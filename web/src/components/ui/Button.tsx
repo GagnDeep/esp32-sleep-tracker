@@ -1,8 +1,11 @@
 import type { JSX, ComponentChildren } from 'preact';
 
-interface Props extends Omit<JSX.HTMLAttributes<HTMLButtonElement>, 'size'> {
+type ButtonAttrs = Omit<JSX.HTMLAttributes<HTMLButtonElement>, 'size'>;
+interface Props extends ButtonAttrs {
   variant?: 'primary' | 'ghost' | 'danger';
   size?: 'sm' | 'md' | 'lg';
+  disabled?: boolean;
+  type?: 'button' | 'submit' | 'reset';
   children?: ComponentChildren;
 }
 
