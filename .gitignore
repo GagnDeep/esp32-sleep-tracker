@@ -23,8 +23,8 @@ dist/
 build/
 *.gz
 *.br
-firmware/data/*.gz
-firmware/data/*.br
+firmware/data/
+!firmware/data/.gitkeep
 firmware/data/manifest.json
 
 # Web

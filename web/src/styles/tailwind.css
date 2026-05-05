@@ -1,0 +1,56 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* OKLCH theme tokens. Dark is the default to match a bedside-friendly
+   palette; .light overrides for daytime use. */
+:root {
+  --surface:       16% 0.012 270;   /* near-black */
+  --surface-2:     20% 0.014 270;
+  --ink:           96% 0.005 250;
+  --ink-muted:     72% 0.012 260;
+  --accent:        78% 0.18 200;    /* cyan-blue */
+  --accent-soft:   60% 0.10 200;
+  --good:          78% 0.16 145;
+  --warn:          82% 0.16 90;
+  --bad:           70% 0.18 25;
+  --stage-deep:    62% 0.14 270;
+  --stage-light:   75% 0.12 200;
+  --stage-awake:   78% 0.16 60;
+  color-scheme: dark;
+}
+.light {
+  --surface:       98% 0.005 250;
+  --surface-2:     94% 0.008 250;
+  --ink:           20% 0.010 270;
+  --ink-muted:     50% 0.010 260;
+  --accent:        55% 0.18 200;
+  --accent-soft:   75% 0.08 200;
+  --good:          55% 0.18 145;
+  --warn:          70% 0.16 80;
+  --bad:           58% 0.20 25;
+  color-scheme: light;
+}
+
+@layer base {
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body, #app { height: 100%; }
+  body {
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    -webkit-tap-highlight-color: transparent;
+  }
+  :where(button, [role='button']):focus-visible,
+  :where(a, [tabindex]):focus-visible {
+    outline: 2px solid oklch(var(--accent) / 0.9);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+  ::selection {
+    background: oklch(var(--accent) / 0.35);
+    color: oklch(var(--ink));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+}
