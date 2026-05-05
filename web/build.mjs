@@ -4,10 +4,29 @@
 // the request includes Accept-Encoding: gzip — every modern browser
 // does.
 import { gzipSync } from 'node:zlib';
-import { readFileSync, writeFileSync, statSync, readdirSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, readdirSync, existsSync } from 'node:fs';
 import path from 'node:path';
+import { build as esbuild } from 'vite';
 
 const DIST = path.resolve('../firmware/data');
+
+// 1. Compile the service worker as a standalone IIFE bundle.
+await esbuild({
+  configFile: false,
+  build: {
+    outDir: DIST,
+    emptyOutDir: false,
+    lib: {
+      entry: path.resolve('src/service-worker.ts'),
+      name: 'sw',
+      formats: ['iife'],
+      fileName: () => 'sw.js',
+    },
+    rollupOptions: { output: { extend: true } },
+    minify: true,
+  },
+  logLevel: 'silent',
+});
 
 function walk(dir) {
   const out = [];
