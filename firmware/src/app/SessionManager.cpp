@@ -79,7 +79,7 @@ void SessionManager::emitSample() {
   }
   s.reserved = 0;
 
-  if (ws_) ws_->broadcastSample(s);
+  ws_broadcaster::broadcastSample(s);
 
   if (!active_) return;
 

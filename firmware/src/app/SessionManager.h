@@ -10,7 +10,6 @@
 #include <Arduino.h>
 
 class SleepStager;
-class WsBroadcaster;
 
 // Owns the recording lifecycle. Wires sensors → DSP → 1Hz Sample
 // records → 60s flush. Holds the current "live" stats so the WS
@@ -45,15 +44,13 @@ class SessionManager {
   void   setMotionArtifact(bool b) { motionArtifact_ = b; }
 
   // Hooks to other layers.
-  void setBroadcaster(WsBroadcaster* w) { ws_ = w; }
-  void setStager(SleepStager* s)        { stager_ = s; }
+  void setStager(SleepStager* s) { stager_ = s; }
 
   HrvWindow& hrv() { return hrv_; }
 
  private:
   SensorRegistry* sensors_ = nullptr;
   SessionStore*   store_   = nullptr;
-  WsBroadcaster*  ws_      = nullptr;
   SleepStager*    stager_  = nullptr;
 
   HeartRateEstimator hr_;
