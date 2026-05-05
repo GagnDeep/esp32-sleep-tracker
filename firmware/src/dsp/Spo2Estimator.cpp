@@ -1,10 +1,10 @@
 #include "Spo2Estimator.h"
+#include "config.h"
 #include <math.h>
 
 namespace {
 constexpr float    DC_TAU     = 0.995f;     // ~2 s @ 100 Hz
 constexpr uint32_t WINDOW_MS  = 1000;       // recompute every 1s
-constexpr float    MIN_DC     = 30'000.0f;  // perfusion floor
 }
 
 void Spo2Estimator::reset() {
@@ -30,6 +30,11 @@ uint16_t Spo2Estimator::push(uint32_t ir, uint32_t red) {
   dcIr_  = dcIr_  * DC_TAU + fIr  * (1.0f - DC_TAU);
   dcRed_ = dcRed_ * DC_TAU + fRed * (1.0f - DC_TAU);
 
+  // Skip frames where perfusion is too low to yield a usable ratio.
+  if (dcIr_ < cfg::MIN_DC || dcRed_ < cfg::MIN_DC) {
+    return last_ == 0xFFFF ? 0 : last_;
+  }
+
   if (fIr  < acIrMin_)  acIrMin_  = fIr;
   if (fIr  > acIrMax_)  acIrMax_  = fIr;
   if (fRed < acRedMin_) acRedMin_ = fRed;
@@ -45,14 +50,20 @@ uint16_t Spo2Estimator::push(uint32_t ir, uint32_t red) {
     acIrMin_ = acIrMax_ = fIr;
     acRedMin_ = acRedMax_ = fRed;
 
-    if (dcIr_ < MIN_DC || dcRed_ < MIN_DC || acIr <= 0.0f || dcRed_ <= 0.0f) {
-      last_ = 0xFFFF;
-      return last_;
+    if (dcIr_ < cfg::MIN_DC || dcRed_ < cfg::MIN_DC ||
+        acIr <= 0.0f || dcRed_ <= 0.0f) {
+      return last_ == 0xFFFF ? 0 : last_;
     }
     const float r = (acRed / dcRed_) / (acIr / dcIr_);
-    float spo2    = calA_ - calB_ * r;
+    if (!isfinite(r)) {
+      return last_ == 0xFFFF ? 0 : last_;
+    }
+    float spo2 = calA_ - calB_ * r;
+    if (!isfinite(spo2)) {
+      return last_ == 0xFFFF ? 0 : last_;
+    }
     if (spo2 > 100.0f) spo2 = 100.0f;
-    if (spo2 < 70.0f)  { last_ = 0xFFFF; return last_; }
+    if (spo2 < 70.0f)  { return last_ == 0xFFFF ? 0 : last_; }
     last_ = (uint16_t)roundf(spo2 * 10.0f);
   }
   return last_;

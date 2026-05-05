@@ -67,7 +67,12 @@ void AlarmController::tick() {
   // Smart alarm: when active session + inside window + light/awake.
   if (sm_->active()) {
     const uint32_t epoch = timeservice::epoch();
-    if (inSmartWindow(epoch) && (epoch - lastFireEpoch_) > MIN_REFIRE_S) {
+    // Use signed 64-bit so a clock jump backwards doesn't underflow.
+    const int64_t since = (int64_t)epoch - (int64_t)lastFireEpoch_;
+    // If the system clock moved backwards by >2 s (NTP correction etc.)
+    // ignore the refire-window suppression so we still evaluate normally.
+    const bool refireOk = (since > (int64_t)MIN_REFIRE_S) || (since < -2);
+    if (inSmartWindow(epoch) && refireOk) {
       const uint8_t stage = sm_->stage();
       if (stage == SampleStage::LIGHT || stage == SampleStage::AWAKE) {
         LOG_INFO(TAG, "smart alarm firing in stage %u", stage);
@@ -86,8 +91,9 @@ void AlarmController::tick() {
     if (lowSpo2BeganMs_ == 0) lowSpo2BeganMs_ = millis();
     const uint32_t breachMs = millis() - lowSpo2BeganMs_;
     const uint32_t epoch = timeservice::epoch();
-    if (breachMs >= (uint32_t)settings.spo2SustainS * 1000 &&
-        (epoch - lastFireEpoch_) > MIN_REFIRE_S) {
+    const int64_t since = (int64_t)epoch - (int64_t)lastFireEpoch_;
+    const bool refireOk = (since > (int64_t)MIN_REFIRE_S) || (since < -2);
+    if (breachMs >= (uint32_t)settings.spo2SustainS * 1000 && refireOk) {
       LOG_WARN(TAG, "low SpO2 (%u.%u%%) sustained — firing",
                spo2 / 10, spo2 % 10);
       startTone(1800, 3000);

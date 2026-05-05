@@ -40,4 +40,14 @@ constexpr uint16_t SMART_ALARM_LOOKAHEAD_S = 1800;  // try wake in last 30 min
 constexpr uint8_t  MAX30102_LED_BRIGHTNESS = 0x1F;  // 0..0xFF
 constexpr uint16_t MAX30102_FINGER_THRESH  = 50'000;
 
+// ---- DSP numeric guards ------------------------------------------------
+constexpr uint16_t MIN_HR_DT_MS = 250;   // ignore beat intervals shorter than this
+constexpr uint16_t HR_MIN       = 25;    // BPM clamp lower bound
+constexpr uint16_t HR_MAX       = 220;   // BPM clamp upper bound
+constexpr float    MIN_DC       = 10000.0f;  // SpO2 perfusion floor
+
+// ---- Watchdog / WS backpressure ---------------------------------------
+constexpr uint8_t  WDT_TIMEOUT_S     = 10;
+constexpr uint8_t  WS_QUEUE_DROP_AT  = 8;
+
 }  // namespace cfg
