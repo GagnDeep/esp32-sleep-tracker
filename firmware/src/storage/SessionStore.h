@@ -36,9 +36,14 @@ class SessionStore {
 
   // On boot: any session file with no sidecar = power-loss orphan;
   // synthesize a minimal "crashed" sidecar so it shows up in History.
+  // Uses the `<id>.start` anchor file (when present) to recover
+  // wall-clock start time even if the system rebooted before NTP sync.
   void finalizeOrphans();
 
  private:
+  void writeStartAnchor(const String& id);
+  void deleteStartAnchor(const String& id);
+
   LittleFsArchive lfs_;
   SdArchive       sd_;
   String          activeId_;

@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <ESPmDNS.h>
 #include <LittleFS.h>
+#include <esp_task_wdt.h>
 
 #include "pins.h"
 #include "config.h"
@@ -31,20 +32,24 @@ AlarmController alarmController;
 
 // Tasks.
 static void sensorTask(void* /*arg*/) {
+  esp_task_wdt_add(nullptr);
   const TickType_t period = pdMS_TO_TICKS(1000 / cfg::SENSOR_HZ);
   TickType_t last = xTaskGetTickCount();
   for (;;) {
     sensors.tick();
     sessionManager.sensorTick();
+    esp_task_wdt_reset();
     vTaskDelayUntil(&last, period);
   }
 }
 
 static void pipelineTask(void* /*arg*/) {
+  esp_task_wdt_add(nullptr);
   const TickType_t period = pdMS_TO_TICKS(50);  // 20Hz; emitSample gates to 1Hz
   TickType_t last = xTaskGetTickCount();
   for (;;) {
     sessionManager.pipelineTick();
+    esp_task_wdt_reset();
     vTaskDelayUntil(&last, period);
   }
 }
@@ -70,6 +75,11 @@ void setup() {
 
   pinMode(pins::STATUS_LED, OUTPUT);
   digitalWrite(pins::STATUS_LED, HIGH);
+
+  // Enable Task WDT before any long-running task subscribes. Pass true
+  // for `panic` so a hung task triggers a clean reboot rather than a
+  // half-alive system.
+  esp_task_wdt_init(cfg::WDT_TIMEOUT_S, true);
 
   if (!LittleFS.begin(true)) {
     LOG_ERROR(TAG, "LittleFS mount failed — halting");

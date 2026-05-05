@@ -1,5 +1,6 @@
 #pragma once
 #include <ESPAsyncWebServer.h>
+#include <stdint.h>
 #include "../storage/Sample.h"
 
 namespace ws_broadcaster {
@@ -13,5 +14,9 @@ void broadcastSample(const Sample& s);
 void broadcastStage(uint8_t stage);
 void broadcastAlarm(const char* kind);
 void broadcastStatus(const char* status);
+
+// Cumulative count of messages dropped due to per-client back-pressure
+// (slow / disconnected clients with full TX queue). Surfaced in /api/status.
+uint32_t dropCount();
 
 }  // namespace ws_broadcaster

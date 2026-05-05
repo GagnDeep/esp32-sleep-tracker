@@ -3,9 +3,18 @@
 #include "../util/TimeService.h"
 #include "config.h"
 #include <ArduinoJson.h>
+#include <LittleFS.h>
 
 namespace {
 constexpr const char* TAG = "store";
+constexpr const char* SESSIONS_DIR = "/sessions";
+
+String startPathFor(const String& id) {
+  return String(SESSIONS_DIR) + "/" + id + ".start";
+}
+String sidecarPathFor(const String& id) {
+  return String(SESSIONS_DIR) + "/" + id + ".json";
+}
 }
 
 bool SessionStore::begin() {
@@ -16,18 +25,41 @@ bool SessionStore::begin() {
   return true;
 }
 
+void SessionStore::writeStartAnchor(const String& id) {
+  JsonDocument d;
+  d["epoch_ms"]     = (uint64_t)timeservice::epoch() * 1000ULL;
+  d["monotonic_ms"] = (uint32_t)timeservice::monotonicMs();
+  String out; serializeJson(d, out);
+  fs::File f = LittleFS.open(startPathFor(id), "w");
+  if (!f) {
+    LOG_WARN(TAG, "anchor open failed: %s", id.c_str());
+    return;
+  }
+  f.print(out);
+  f.flush();
+  f.close();
+}
+
+void SessionStore::deleteStartAnchor(const String& id) {
+  const String p = startPathFor(id);
+  if (LittleFS.exists(p)) LittleFS.remove(p);
+}
+
 bool SessionStore::startSession(const String& id) {
   if (isActive()) {
     LOG_WARN(TAG, "startSession while another active");
     return false;
   }
-  // Ensure free space; rotate oldest if SD copy exists.
-  lfs_.rotateOldestIfBelow(cfg::LITTLEFS_RESERVE_BYTES, /*requireSdCopy=*/true, &sd_);
+  // Ensure free space; rotate oldest. When SD is mounted require an SD copy
+  // before dropping; without SD we have to permit deletion to avoid lockup.
+  const bool requireSdCopy = sd_.mounted();
+  lfs_.rotateOldestIfBelow(cfg::LITTLEFS_RESERVE_BYTES, requireSdCopy, &sd_);
 
   if (!lfs_.openAppend(id)) return false;
   sd_.openAppend(id);  // best-effort
   activeId_ = id;
   sdHealthy_ = sd_.mounted();
+  writeStartAnchor(id);
   LOG_INFO(TAG, "session start: %s (sd=%s)", id.c_str(), sdHealthy_ ? "yes" : "no");
   return true;
 }
@@ -53,6 +85,8 @@ bool SessionStore::finalize(const String& id, const String& sidecarJson) {
   sd_.close();
   const bool a = lfs_.writeSidecar(id, sidecarJson);
   sd_.writeSidecar(id, sidecarJson);
+  // Clean finalize — anchor file is no longer needed.
+  deleteStartAnchor(id);
   activeId_ = String();
   return a;
 }
@@ -72,6 +106,7 @@ size_t SessionStore::fileSize(const String& id) { return lfs_.fileSize(id); }
 
 bool SessionStore::deleteSession(const String& id) {
   bool a = lfs_.deleteSession(id);
+  deleteStartAnchor(id);
   // SD: if mounted, do best-effort cleanup.
   return a;
 }
@@ -79,16 +114,42 @@ bool SessionStore::deleteSession(const String& id) {
 void SessionStore::finalizeOrphans() {
   for (const String& id : lfs_.listSessions()) {
     String existing;
-    if (lfs_.readSidecar(id, existing) && existing.length() > 0) continue;
+    if (lfs_.readSidecar(id, existing) && existing.length() > 0) {
+      // Has sidecar — clean any leftover anchor and continue.
+      deleteStartAnchor(id);
+      continue;
+    }
     LOG_WARN(TAG, "orphan session: %s — synthesising sidecar", id.c_str());
+
+    // Try to read the anchor for an accurate start time.
+    uint64_t epochMs = 0;
+    const String anchorPath = startPathFor(id);
+    if (LittleFS.exists(anchorPath)) {
+      fs::File f = LittleFS.open(anchorPath, "r");
+      if (f) {
+        String body = f.readString();
+        f.close();
+        JsonDocument ad;
+        if (deserializeJson(ad, body) == DeserializationError::Ok) {
+          epochMs = ad["epoch_ms"] | (uint64_t)0;
+        }
+      }
+    }
+
     JsonDocument doc;
     doc["id"]               = id;
     doc["started_at"]       = id;
+    if (epochMs > 0) {
+      const uint32_t epochS = (uint32_t)(epochMs / 1000ULL);
+      doc["started_at_unix"] = epochS;
+      doc["started_at"]      = timeservice::isoOf(epochS);
+    }
     doc["ended_at"]         = id;
     doc["duration_s"]       = 0;
     doc["crashed"]          = true;
     doc["firmware_version"] = "unknown";
     String out; serializeJson(doc, out);
     lfs_.writeSidecar(id, out);
+    deleteStartAnchor(id);
   }
 }
