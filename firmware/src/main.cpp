@@ -8,6 +8,7 @@
 
 #include "util/Log.h"
 #include "util/TimeService.h"
+#include "util/I2cBus.h"
 
 #include "sensors/SensorRegistry.h"
 #include "storage/SessionStore.h"
@@ -78,6 +79,7 @@ void setup() {
   settings.load();
   timeservice::setTimezone(settings.timezone.c_str());
 
+  i2cbus::init();
   sensors.begin();
   sessionStore.begin();          // also finalises orphan sessions
   sessionManager.begin(&sensors, &sessionStore);

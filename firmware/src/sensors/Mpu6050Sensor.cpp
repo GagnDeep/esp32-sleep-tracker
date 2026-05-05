@@ -1,6 +1,7 @@
 #include "Mpu6050Sensor.h"
 #include "../util/Log.h"
 #include "../util/TimeService.h"
+#include "../util/I2cBus.h"
 
 namespace {
 constexpr const char* TAG = "mpu6050";
@@ -13,14 +14,17 @@ constexpr float SCALE = 0.0035f;
 }  // namespace
 
 bool Mpu6050Sensor::begin() {
-  dev_.initialize();
-  ok_ = dev_.testConnection();
-  if (!ok_) {
-    LOG_ERROR(TAG, "testConnection failed");
-    return false;
+  {
+    I2cGuard g;
+    dev_.initialize();
+    ok_ = dev_.testConnection();
+    if (!ok_) {
+      LOG_ERROR(TAG, "testConnection failed");
+      return false;
+    }
+    // ±2g full-scale gives the best resolution for sleep-scale movement.
+    dev_.setFullScaleAccelRange(MPU6050_ACCEL_FS_2);
   }
-  // ±2g full-scale gives the best resolution for sleep-scale movement.
-  dev_.setFullScaleAccelRange(MPU6050_ACCEL_FS_2);
   LOG_INFO(TAG, "online");
   return true;
 }
@@ -28,7 +32,10 @@ bool Mpu6050Sensor::begin() {
 void Mpu6050Sensor::poll() {
   if (!ok_) return;
   int16_t ax, ay, az, gx, gy, gz;
-  dev_.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
+  {
+    I2cGuard g;
+    dev_.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
+  }
 
   const int32_t dx = ax - prevAx_;
   const int32_t dy = ay - prevAy_;

@@ -1,5 +1,6 @@
 #include "SensorRegistry.h"
 #include "../util/Log.h"
+#include "../util/I2cBus.h"
 #include <Wire.h>
 #include "pins.h"
 
@@ -8,8 +9,11 @@ constexpr const char* TAG = "sensors";
 }
 
 bool SensorRegistry::begin() {
-  Wire.begin(pins::I2C_SDA, pins::I2C_SCL);
-  Wire.setClock(400'000);
+  {
+    I2cGuard g;
+    Wire.begin(pins::I2C_SDA, pins::I2C_SCL);
+    Wire.setClock(400'000);
+  }
 
   const bool maxOk = max_.begin();
   const bool mpuOk = mpu_.begin();
