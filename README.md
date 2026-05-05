@@ -43,6 +43,19 @@ Data format for DIY analysis: [`docs/data-format.md`](docs/data-format.md).
 - `docs/` — wiring diagrams, flashing notes, data format reference.
 - `tools/analyze.py` — optional offline analysis of CSV exports.
 
+## Screenshots
+
+> _Screenshots coming soon — flash a unit and the SPA will look ~much~
+> better with real data behind it._
+
+## Documentation
+
+- [`docs/wiring.md`](docs/wiring.md) — pin map, ASCII diagram.
+- [`docs/flashing.md`](docs/flashing.md) — first flash, OTA, troubleshooting.
+- [`docs/data-format.md`](docs/data-format.md) — `Sample` layout, sidecar JSON, CSV columns.
+- [`tools/analyze.py`](tools/analyze.py) — plot a CSV export with matplotlib.
+
 ## License
 
-Personal-use project. No warranty. See `LICENSE` if/when added.
+Personal-use project. No warranty, no medical claims. Add a `LICENSE`
+of your choice (MIT is a good default for hobbyist hardware projects).
