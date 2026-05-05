@@ -15,6 +15,10 @@ void broadcastStage(uint8_t stage);
 void broadcastAlarm(const char* kind);
 void broadcastStatus(const char* status);
 
+// Broadcast an arbitrary, already-serialised JSON message (e.g. OTA
+// progress events). Caller is responsible for the JSON.
+void broadcastRaw(const char* json);
+
 // Cumulative count of messages dropped due to per-client back-pressure
 // (slow / disconnected clients with full TX queue). Surfaced in /api/status.
 uint32_t dropCount();

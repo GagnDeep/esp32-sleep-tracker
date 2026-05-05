@@ -21,6 +21,7 @@
 #include "net/WifiProvisioner.h"
 #include "net/WebServer.h"
 #include "net/WsBroadcaster.h"
+#include "net/OtaService.h"
 
 namespace { constexpr const char* TAG = "main"; }
 
@@ -112,6 +113,8 @@ void setup() {
   timeservice::begin(settings.timezone.c_str(), cfg::NTP_SERVER);
 
   web::begin();
+  // Arm the OTA pending-verify watchdog (no-op if no pending marker).
+  otaservice::begin();
 
   xTaskCreatePinnedToCore(sensorTask,   "sensor",   8192, nullptr, 3, nullptr, 1);
   xTaskCreatePinnedToCore(pipelineTask, "pipeline", 8192, nullptr, 2, nullptr, 0);

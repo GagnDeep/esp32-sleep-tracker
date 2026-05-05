@@ -1,4 +1,5 @@
 #include "ApiHandlers.h"
+#include "OtaService.h"
 #include "WifiProvisioner.h"
 #include "WsBroadcaster.h"
 #include "../app/SessionManager.h"
@@ -12,6 +13,9 @@
 #include <ArduinoJson.h>
 #include <AsyncJson.h>
 #include <math.h>
+#include <memory>
+#include <time.h>
+#include <set>
 
 extern SessionStore sessionStore;
 extern AlarmController alarmController;
@@ -19,10 +23,45 @@ extern AlarmController alarmController;
 namespace {
 constexpr const char* TAG = "api";
 
+// ---------- helpers --------------------------------------------------------
+
 void sendJson(AsyncWebServerRequest* req, int code, const String& body) {
   auto* res = req->beginResponse(code, "application/json", body);
   res->addHeader("Cache-Control", "no-store");
   req->send(res);
+}
+
+// Constant-time string compare. Always walks max(len(a),len(b)) so a
+// timing attacker can't learn the configured-pin length.
+bool ctEquals(const String& a, const String& b) {
+  const size_t la = a.length();
+  const size_t lb = b.length();
+  const size_t n  = la > lb ? la : lb;
+  uint8_t diff = (uint8_t)(la ^ lb);
+  for (size_t i = 0; i < n; ++i) {
+    const uint8_t ca = i < la ? (uint8_t)a[i] : 0;
+    const uint8_t cb = i < lb ? (uint8_t)b[i] : 0;
+    diff |= (uint8_t)(ca ^ cb);
+  }
+  return diff == 0;
+}
+
+// True if request is allowed: either no PIN configured, or X-Pin matches.
+// On failure sends 401 and returns false (caller should `return`).
+bool authOk(AsyncWebServerRequest* req) {
+  // Empty PIN = system is open.
+  if (settings.pin.length() == 0) {
+    otaservice::markBootGood();
+    return true;
+  }
+  String got;
+  if (req->hasHeader("X-Pin")) got = req->header("X-Pin");
+  if (ctEquals(got, settings.pin)) {
+    otaservice::markBootGood();
+    return true;
+  }
+  sendJson(req, 401, "{\"error\":\"unauthorized\"}");
+  return false;
 }
 
 String idFromUrl(const String& url, const char* prefix, const char* suffix = nullptr) {
@@ -39,28 +78,43 @@ String idFromUrl(const String& url, const char* prefix, const char* suffix = nul
   return id;
 }
 
+// Per-request CSV streaming state. Allocated on the heap, captured by
+// the chunked-callback closure (and the on-disconnect cleanup), freed
+// on completion. Replaces the previous `static bool headerSent` which
+// was racy under concurrent CSV downloads.
+struct CsvState {
+  String id;
+  bool   headerSent = false;
+  bool   readerOpen = false;
+};
+
 void csvForSession(AsyncWebServerRequest* req, const String& id) {
   if (!sessionStore.openRead(id)) {
     sendJson(req, 404, "{\"error\":\"not_found\"}");
     return;
   }
+  auto* st = new CsvState();
+  st->id = id;
+  st->readerOpen = true;
+
   AsyncWebServerResponse* res = req->beginChunkedResponse(
     "text/csv",
-    [](uint8_t* buf, size_t maxLen, size_t /*idx*/) -> size_t {
-      static bool headerSent = false;
-      if (!headerSent) {
+    [st](uint8_t* buf, size_t maxLen, size_t /*idx*/) -> size_t {
+      if (!st->headerSent) {
         const char* h = "t_ms,hr_bpm,spo2_pct,activity,stage,flags\n";
         size_t hl = strlen(h);
         if (hl > maxLen) return 0;
         memcpy(buf, h, hl);
-        headerSent = true;
+        st->headerSent = true;
         return hl;
       }
       Sample s;
       const int n = sessionStore.readBlock(reinterpret_cast<uint8_t*>(&s), sizeof(s));
       if (n <= 0) {
-        sessionStore.closeRead();
-        headerSent = false;
+        if (st->readerOpen) {
+          sessionStore.closeRead();
+          st->readerOpen = false;
+        }
         return 0;
       }
       char line[96];
@@ -76,6 +130,11 @@ void csvForSession(AsyncWebServerRequest* req, const String& id) {
   res->addHeader("Cache-Control", "no-store");
   res->addHeader("Content-Disposition",
                  String("attachment; filename=\"") + id + ".csv\"");
+  // Free per-request state when the response goes away.
+  req->onDisconnect([st]() {
+    if (st->readerOpen) sessionStore.closeRead();
+    delete st;
+  });
   req->send(res);
 }
 
@@ -98,6 +157,75 @@ void rawForSession(AsyncWebServerRequest* req, const String& id) {
   req->send(res);
 }
 
+// Whitelisted tags. Anything else is rejected by PATCH /api/sessions/:id.
+bool isAllowedTag(const String& t) {
+  static const char* kAllowed[] = {
+    "sick", "workout", "alcohol", "travel",
+    "caffeine", "medication", "nap", "napless",
+  };
+  for (const char* a : kAllowed) if (t == a) return true;
+  return false;
+}
+
+// ---- Alarm preview ---------------------------------------------------------
+//
+// Returns the next epoch second at which the smart-alarm window opens
+// (matching the same logic AlarmController uses), and a human-readable
+// reason string. Looks up to 8 days ahead so even a Mon-only alarm has
+// a result. Returns -1/null if alarm is disabled.
+
+struct AlarmPreview {
+  int64_t  nextFireUnix  = -1;     // -1 = none
+  int64_t  wouldFireInS  = -1;     // seconds from now
+  String   reason;
+};
+
+AlarmPreview computeAlarmPreview() {
+  AlarmPreview p;
+  if (!settings.alarmEnabled) { p.reason = "alarm_disabled"; return p; }
+  const time_t now = time(nullptr);
+  if (now <= 0) { p.reason = "clock_not_synced"; return p; }
+
+  // Walk forward minute-by-minute up to 8 days. The window is small
+  // (hundreds of minutes/day) so an O(8*24*60) walk is fine and keeps
+  // the logic identical to AlarmController::inSmartWindow().
+  const uint16_t startMin = settings.alarmStartMin;
+  const uint16_t endMin   = settings.alarmEndMin;
+  const uint8_t  daysMask = settings.alarmDays;
+  for (int dayOffset = 0; dayOffset < 8; ++dayOffset) {
+    struct tm lt;
+    time_t day = now + (time_t)dayOffset * 86400;
+    localtime_r(&day, &lt);
+    // Reset to midnight of that day.
+    lt.tm_hour = 0; lt.tm_min = 0; lt.tm_sec = 0;
+    const time_t midnight = mktime(&lt);
+    // Day-of-week mask check: AlarmController treats mask==0 as any-day.
+    const bool dayOk = (daysMask == 0) ||
+                       ((daysMask & (1 << lt.tm_wday)) != 0);
+    if (!dayOk) continue;
+    const time_t windowStart = midnight + (time_t)startMin * 60;
+    const time_t windowEnd   = midnight + (time_t)endMin   * 60;
+    // Skip windows entirely in the past.
+    if (windowEnd <= now) continue;
+    const time_t fireAt = (windowStart > now) ? windowStart : now;
+    p.nextFireUnix = (int64_t)fireAt;
+    p.wouldFireInS = (int64_t)fireAt - (int64_t)now;
+    if (fireAt <= now) {
+      p.reason = "would_fire_now";
+    } else {
+      const int64_t s = p.wouldFireInS;
+      const int h = (int)(s / 3600);
+      const int m = (int)((s % 3600) / 60);
+      char buf[64];
+      snprintf(buf, sizeof(buf), "next_window_in_%dh_%dm", h, m);
+      p.reason = buf;
+    }
+    return p;
+  }
+  p.reason = "no_window_in_next_8d";
+  return p;
+}
+
 }  // namespace
 
 namespace api {
@@ -105,6 +233,9 @@ namespace api {
 void registerRoutes(AsyncWebServer& s) {
   // ---- /api/status -----------------------------------------------------
   s.on("/api/status", HTTP_GET, [](AsyncWebServerRequest* req) {
+    // GET endpoints stay open; still mark boot-good so OTA verify is
+    // satisfied as soon as the new firmware serves any meaningful API.
+    otaservice::markBootGood();
     JsonDocument d;
     d["device_name"]      = settings.deviceName;
     d["firmware_version"] = FIRMWARE_VERSION;
@@ -127,6 +258,7 @@ void registerRoutes(AsyncWebServer& s) {
     d["live"]["flags"]    = sessionManager.flags();
     d["calibration_nights_done"] = settings.baselineNights;
     d["ws_drops"]         = ws_broadcaster::dropCount();
+    d["pin_required"]     = settings.pin.length() > 0;
     String out; serializeJson(d, out);
     sendJson(req, 200, out);
   });
@@ -175,17 +307,150 @@ void registerRoutes(AsyncWebServer& s) {
   });
 
   s.on("^/api/sessions/(.+)$", HTTP_DELETE, [](AsyncWebServerRequest* req) {
+    if (!authOk(req)) return;
     String id = idFromUrl(req->url(), "/api/sessions/");
     const bool ok = sessionStore.deleteSession(id);
     sendJson(req, ok ? 200 : 404, ok ? "{\"ok\":true}" : "{\"error\":\"not_found\"}");
   });
 
+  // PATCH /api/sessions/:id  body={tags?: string[], notes?: string}
+  //
+  // We can't reuse AsyncCallbackJsonWebHandler because that handler
+  // matches a fixed URL — we need a path parameter. Instead, register
+  // a regex route with a body-accumulating closure: the body callback
+  // gathers chunks into a heap String stashed in `_tempObject`; the
+  // request callback (which fires after the full body has been
+  // received) parses and acts on it.
+  s.on("^/api/sessions/(.+)$", HTTP_PATCH,
+    /*onRequest*/ [](AsyncWebServerRequest* req) {
+      if (!authOk(req)) {
+        // authOk sent 401; clean up any accumulated body.
+        if (req->_tempObject) {
+          delete (String*)req->_tempObject;
+          req->_tempObject = nullptr;
+        }
+        return;
+      }
+      std::unique_ptr<String> body((String*)req->_tempObject);
+      req->_tempObject = nullptr;
+      if (!body || body->length() == 0) {
+        sendJson(req, 400, "{\"error\":\"empty_body\"}");
+        return;
+      }
+
+      const String id = idFromUrl(req->url(), "/api/sessions/");
+      if (id.length() == 0) {
+        sendJson(req, 404, "{\"error\":\"not_found\"}");
+        return;
+      }
+      JsonDocument doc;
+      if (deserializeJson(doc, *body) != DeserializationError::Ok ||
+          !doc.is<JsonObject>()) {
+        sendJson(req, 400, "{\"error\":\"invalid_json\"}");
+        return;
+      }
+      JsonObject o = doc.as<JsonObject>();
+
+      // Reject unknown fields.
+      for (JsonPair kv : o) {
+        const String k = String(kv.key().c_str());
+        if (k != "tags" && k != "notes") {
+          String b = String("{\"error\":\"unknown_field\",\"field\":\"") + k + "\"}";
+          sendJson(req, 400, b);
+          return;
+        }
+      }
+
+      // Validate tags.
+      std::vector<String> tags;
+      bool tagsPresent = false;
+      if (o["tags"].is<JsonArray>()) {
+        tagsPresent = true;
+        std::set<String> seen;
+        for (JsonVariant t : o["tags"].as<JsonArray>()) {
+          if (!t.is<const char*>()) {
+            sendJson(req, 400, "{\"error\":\"invalid_tag_type\"}");
+            return;
+          }
+          String tag = String((const char*)t);
+          if (!isAllowedTag(tag)) {
+            String b = String("{\"error\":\"invalid_tag\",\"tag\":\"") + tag + "\"}";
+            sendJson(req, 400, b);
+            return;
+          }
+          if (seen.insert(tag).second) tags.push_back(tag);
+        }
+      } else if (!o["tags"].isNull()) {
+        // Present but not an array (and not null).
+        sendJson(req, 400, "{\"error\":\"invalid_tags\"}");
+        return;
+      }
+
+      // Validate notes.
+      String notes;
+      bool notesPresent = false;
+      if (o["notes"].is<const char*>()) {
+        notesPresent = true;
+        notes = String((const char*)o["notes"]);
+        if (notes.length() > 2048) {
+          sendJson(req, 400, "{\"error\":\"notes_too_long\"}");
+          return;
+        }
+      } else if (!o["notes"].isNull()) {
+        sendJson(req, 400, "{\"error\":\"invalid_notes\"}");
+        return;
+      }
+
+      // Read-modify-write the sidecar under the global file lock.
+      String updated;
+      const bool ok = sessionStore.mutateSidecar(
+        id, [&](JsonDocument& d) -> bool {
+          if (tagsPresent) {
+            d.remove("tags");
+            JsonArray arr = d["tags"].to<JsonArray>();
+            for (const auto& t : tags) arr.add(t);
+          }
+          if (notesPresent) {
+            d["notes"] = notes;
+          }
+          serializeJson(d, updated);
+          return true;
+        });
+      if (!ok) {
+        sendJson(req, 404, "{\"error\":\"not_found\"}");
+        return;
+      }
+      sendJson(req, 200, updated);
+    },
+    /*onUpload*/ nullptr,
+    /*onBody*/ [](AsyncWebServerRequest* req, uint8_t* data, size_t len,
+                   size_t index, size_t total) {
+      // Cap total body size; the onRequest callback will see an empty
+      // _tempObject and respond with 413.
+      if (total > 4096) {
+        if (req->_tempObject) {
+          delete (String*)req->_tempObject;
+          req->_tempObject = nullptr;
+        }
+        return;
+      }
+      String* body = (String*)req->_tempObject;
+      if (!body) {
+        body = new String();
+        body->reserve(total);
+        req->_tempObject = body;
+      }
+      body->concat((const char*)data, len);
+    });
+
   // ---- /api/sessions/start | /stop ------------------------------------
   s.on("/api/sessions/start", HTTP_POST, [](AsyncWebServerRequest* req) {
+    if (!authOk(req)) return;
     if (sessionManager.startSession()) sendJson(req, 200, "{\"ok\":true}");
     else                               sendJson(req, 409, "{\"error\":\"already_active\"}");
   });
   s.on("/api/sessions/stop", HTTP_POST, [](AsyncWebServerRequest* req) {
+    if (!authOk(req)) return;
     if (sessionManager.stopSession()) sendJson(req, 200, "{\"ok\":true}");
     else                              sendJson(req, 409, "{\"error\":\"not_active\"}");
   });
@@ -208,13 +473,16 @@ void registerRoutes(AsyncWebServer& s) {
     d["thresh_still"]     = settings.threshStill;
     d["baseline_nights"]  = settings.baselineNights;
     d["user_baseline_rmssd"] = settings.userBaselineRmssd;
+    // Don't echo the PIN itself; only whether one is set.
+    d["pin_set"]          = settings.pin.length() > 0;
     String out; serializeJson(d, out);
     sendJson(req, 200, out);
   });
 
   // PUT /api/settings (body = full or partial JSON)
-  auto putSettings = new AsyncCallbackJsonWebHandler(
+  auto* putSettings = new AsyncCallbackJsonWebHandler(
     "/api/settings", [](AsyncWebServerRequest* req, JsonVariant& v) {
+      if (!authOk(req)) return;
       JsonObject o = v.as<JsonObject>();
 
       // Validate every field that is present, then commit atomically.
@@ -292,7 +560,8 @@ void registerRoutes(AsyncWebServer& s) {
       settings.requestSave();
       sendJson(req, 200, "{\"ok\":true}");
     });
-  s.addHandler(putSettings).setMethod(HTTP_PUT);
+  putSettings->setMethod(HTTP_PUT);
+  s.addHandler(putSettings);
 
   // ---- /api/alarm ------------------------------------------------------
   s.on("/api/alarm", HTTP_GET, [](AsyncWebServerRequest* req) {
@@ -307,20 +576,72 @@ void registerRoutes(AsyncWebServer& s) {
     sendJson(req, 200, out);
   });
 
+  // GET /api/alarm/preview
+  s.on("/api/alarm/preview", HTTP_GET, [](AsyncWebServerRequest* req) {
+    AlarmPreview p = computeAlarmPreview();
+    JsonDocument d;
+    if (p.nextFireUnix < 0) {
+      d["next_fire_unix"]  = (const char*)nullptr;
+      d["would_fire_in_s"] = (const char*)nullptr;
+    } else {
+      d["next_fire_unix"]  = (uint64_t)p.nextFireUnix;
+      d["would_fire_in_s"] = (int64_t)p.wouldFireInS;
+    }
+    d["reason"] = p.reason;
+    String out; serializeJson(d, out);
+    sendJson(req, 200, out);
+  });
+
   s.on("/api/alarm/test", HTTP_POST, [](AsyncWebServerRequest* req) {
+    if (!authOk(req)) return;
     alarmController.test();
     sendJson(req, 200, "{\"ok\":true}");
   });
   s.on("/api/alarm/silence", HTTP_POST, [](AsyncWebServerRequest* req) {
+    if (!authOk(req)) return;
     alarmController.silence();
     sendJson(req, 200, "{\"ok\":true}");
   });
 
-  // ---- /api/wifi/reset ------------------------------------------------
+  // ---- /api/wifi -------------------------------------------------------
   s.on("/api/wifi/reset", HTTP_POST, [](AsyncWebServerRequest* req) {
+    if (!authOk(req)) return;
     sendJson(req, 200, "{\"ok\":true,\"rebooting\":true}");
     delay(200);
     wifi::resetAndReboot();
+  });
+
+  // GET /api/wifi/scan — cached scan list.
+  s.on("/api/wifi/scan", HTTP_GET, [](AsyncWebServerRequest* req) {
+    auto entries = wifi::scan(30000);
+    JsonDocument d;
+    JsonArray arr = d["networks"].to<JsonArray>();
+    for (const auto& e : entries) {
+      JsonObject o = arr.add<JsonObject>();
+      o["ssid"] = e.ssid;
+      o["rssi"] = (int)e.rssi;
+      o["enc"]  = e.enc;
+    }
+    String out; serializeJson(d, out);
+    sendJson(req, 200, out);
+  });
+
+  // ---- /api/auth/check -------------------------------------------------
+  s.on("/api/auth/check", HTTP_POST, [](AsyncWebServerRequest* req) {
+    // Empty PIN counts as a match (system is open).
+    if (settings.pin.length() == 0) {
+      otaservice::markBootGood();
+      req->send(204);
+      return;
+    }
+    String got;
+    if (req->hasHeader("X-Pin")) got = req->header("X-Pin");
+    if (ctEquals(got, settings.pin)) {
+      otaservice::markBootGood();
+      req->send(204);
+      return;
+    }
+    sendJson(req, 401, "{\"error\":\"unauthorized\"}");
   });
 
   LOG_INFO(TAG, "routes registered");

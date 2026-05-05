@@ -3,6 +3,10 @@
 #include "SdArchive.h"
 #include "Sample.h"
 #include <Arduino.h>
+#include <ArduinoJson.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
+#include <functional>
 #include <vector>
 
 // Façade over LittleFsArchive (primary) + SdArchive (mirror).
@@ -40,6 +44,19 @@ class SessionStore {
   // wall-clock start time even if the system rebooted before NTP sync.
   void finalizeOrphans();
 
+  // Read-modify-write a sidecar JSON under the global sidecar mutex.
+  // Returns false if the session id has no sidecar on disk. The mutator
+  // receives a parsed JsonDocument (already populated with the on-disk
+  // contents); whatever fields it sets are persisted back. The mutator
+  // must return true to commit, false to abort the write.
+  bool mutateSidecar(const String& id,
+                     const std::function<bool(JsonDocument&)>& mut);
+
+  // Acquire/release the sidecar mutex (used by callers that need to do
+  // a multi-step read+write on their own).
+  void sidecarLock();
+  void sidecarUnlock();
+
  private:
   void writeStartAnchor(const String& id);
   void deleteStartAnchor(const String& id);
@@ -48,4 +65,5 @@ class SessionStore {
   SdArchive       sd_;
   String          activeId_;
   bool            sdHealthy_ = true;
+  SemaphoreHandle_t sidecarMutex_ = nullptr;
 };

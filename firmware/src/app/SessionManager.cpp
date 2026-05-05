@@ -6,6 +6,7 @@
 #include "../util/TimeService.h"
 #include "version.h"
 #include <ArduinoJson.h>
+#include <time.h>
 
 namespace {
 constexpr const char* TAG = "session";
@@ -157,15 +158,29 @@ bool SessionManager::stopSession() {
 
 String SessionManager::buildSidecar(uint32_t endedEpoch, uint32_t durationS) const {
   JsonDocument d;
+  d["schema_version"]  = 2;
+  d["sample_format_version"] = 1;
   d["id"]              = sessionId_;
   d["started_at"]      = sessionStartedEpoch_ ? timeservice::isoOf(sessionStartedEpoch_) : sessionId_;
+  d["started_at_unix"] = (uint64_t)sessionStartedEpoch_;
   d["ended_at"]        = endedEpoch ? timeservice::isoOf(endedEpoch) : String();
+  d["ended_at_unix"]   = (uint64_t)endedEpoch;
+  // tz_offset_min: snapshot at finalize time (derived via localtime).
+  {
+    time_t now = endedEpoch ? (time_t)endedEpoch : time(nullptr);
+    struct tm lt;
+    localtime_r(&now, &lt);
+    d["tz_offset_min"] = (int32_t)(lt.tm_gmtoff / 60);
+  }
   d["duration_s"]      = durationS;
   d["hr_min"]          = hrMin_ == 0xFFFF ? 0 : hrMin_;
   d["hr_max"]          = hrMax_;
   d["hr_avg"]          = hrAvgN_ ? (uint16_t)(hrAvgSum_ / hrAvgN_) : 0;
   d["spo2_min_x10"]    = spo2Min_ == 0xFFFF ? 0 : spo2Min_;
   d["spo2_avg_x10"]    = spo2AvgN_ ? (uint16_t)(spo2AvgSum_ / spo2AvgN_) : 0;
+  d["hrv_rmssd"]       = (const char*)nullptr;  // null placeholder
+  d["tags"].to<JsonArray>();
+  d["notes"]           = "";
   JsonArray tis = d["time_in_stage"].to<JsonArray>();
   for (auto v : timeInStage_) tis.add(v);
   // Sleep score: only valid once baseline is calibrated.

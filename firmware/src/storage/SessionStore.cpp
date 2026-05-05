@@ -4,6 +4,7 @@
 #include "config.h"
 #include <ArduinoJson.h>
 #include <LittleFS.h>
+#include <time.h>
 
 namespace {
 constexpr const char* TAG = "store";
@@ -18,11 +19,45 @@ String sidecarPathFor(const String& id) {
 }
 
 bool SessionStore::begin() {
+  if (!sidecarMutex_) sidecarMutex_ = xSemaphoreCreateMutex();
   const bool lfsOk = lfs_.begin();
   if (!lfsOk) return false;
   sd_.begin();  // SD failure is non-fatal
   finalizeOrphans();
   return true;
+}
+
+void SessionStore::sidecarLock() {
+  if (!sidecarMutex_) sidecarMutex_ = xSemaphoreCreateMutex();
+  if (sidecarMutex_) xSemaphoreTake(sidecarMutex_, portMAX_DELAY);
+}
+
+void SessionStore::sidecarUnlock() {
+  if (sidecarMutex_) xSemaphoreGive(sidecarMutex_);
+}
+
+bool SessionStore::mutateSidecar(
+    const String& id, const std::function<bool(JsonDocument&)>& mut) {
+  sidecarLock();
+  String existing;
+  if (!lfs_.readSidecar(id, existing) || existing.length() == 0) {
+    sidecarUnlock();
+    return false;
+  }
+  JsonDocument d;
+  if (deserializeJson(d, existing) != DeserializationError::Ok) {
+    sidecarUnlock();
+    return false;
+  }
+  if (!mut(d)) {
+    sidecarUnlock();
+    return false;
+  }
+  String out; serializeJson(d, out);
+  const bool ok = lfs_.writeSidecar(id, out);
+  if (ok) sd_.writeSidecar(id, out);
+  sidecarUnlock();
+  return ok;
 }
 
 void SessionStore::writeStartAnchor(const String& id) {
@@ -137,16 +172,30 @@ void SessionStore::finalizeOrphans() {
     }
 
     JsonDocument doc;
+    doc["schema_version"]   = 2;
+    doc["sample_format_version"] = 1;
     doc["id"]               = id;
     doc["started_at"]       = id;
+    doc["started_at_unix"]  = (uint64_t)0;
+    doc["ended_at_unix"]    = (uint64_t)0;
     if (epochMs > 0) {
       const uint32_t epochS = (uint32_t)(epochMs / 1000ULL);
-      doc["started_at_unix"] = epochS;
+      doc["started_at_unix"] = (uint64_t)epochS;
       doc["started_at"]      = timeservice::isoOf(epochS);
+    }
+    // tz_offset_min: best-effort snapshot at recovery time.
+    {
+      time_t now = time(nullptr);
+      struct tm lt;
+      localtime_r(&now, &lt);
+      doc["tz_offset_min"] = (int32_t)(lt.tm_gmtoff / 60);
     }
     doc["ended_at"]         = id;
     doc["duration_s"]       = 0;
     doc["crashed"]          = true;
+    doc["hrv_rmssd"]        = (const char*)nullptr;  // null
+    doc["tags"].to<JsonArray>();
+    doc["notes"]            = "";
     doc["firmware_version"] = "unknown";
     String out; serializeJson(doc, out);
     lfs_.writeSidecar(id, out);

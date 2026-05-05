@@ -78,6 +78,12 @@ void broadcastStatus(const char* status) {
   sendOrDrop(body.c_str(), body.length());
 }
 
+void broadcastRaw(const char* json) {
+  if (!s_ws || !json) return;
+  if (s_ws->count() == 0) return;
+  sendOrDrop(json, strlen(json));
+}
+
 uint32_t dropCount() {
   return s_drops.load(std::memory_order_relaxed);
 }
