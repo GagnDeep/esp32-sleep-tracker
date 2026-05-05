@@ -20,7 +20,10 @@ export interface StageEvent  { type: 'stage';  value: number; }
 export interface AlarmEvent  { type: 'alarm';  kind: string; }
 export interface StatusEvent { type: 'status'; value: string; }
 export interface DropsEvent  { type: 'drops';  count: number; }
-export type WsEvent = SampleEvent | StageEvent | AlarmEvent | StatusEvent | DropsEvent;
+export interface OtaProgressEvent { type: 'ota_progress'; pct: number; phase?: string; }
+export type WsEvent =
+  | SampleEvent | StageEvent | AlarmEvent
+  | StatusEvent | DropsEvent | OtaProgressEvent;
 
 const listeners = new Map<WsEvent['type'], Set<Listener<WsEvent>>>();
 

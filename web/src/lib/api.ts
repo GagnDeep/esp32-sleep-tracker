@@ -69,6 +69,10 @@ export interface SettingsBody {
   thresh_still: number;
   baseline_nights: number;
   user_baseline_rmssd: number;
+  // Seconds over which the alarm volume ramps from quiet to full —
+  // 0 = abrupt, up to ~60 s for a gentler wake. Optional so older
+  // firmware that doesn't report it still parses cleanly.
+  volume_ramp_s?: number;
   // PIN write-only; firmware never returns the plaintext but reports
   // whether one is set via `pin_set` on the extended endpoint.
   pin?: string;
