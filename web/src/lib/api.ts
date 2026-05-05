@@ -1,6 +1,8 @@
 // Typed wrappers for every REST endpoint. Types mirror the firmware
 // schemas; if you change the wire format on either side, change both.
 
+import { headers as authHeaders, pinRequired } from './auth';
+
 export interface DeviceStatus {
   device_name: string;
   firmware_version: string;
@@ -31,6 +33,15 @@ export interface SessionSummary {
   sleep_score?: number;
   crashed?: boolean;
   firmware_version?: string;
+  // Schema v2 additions — all optional so v1 sidecars still parse.
+  schema_version?: number;
+  started_at_unix?: number;
+  ended_at_unix?: number;
+  tz_offset_min?: number;
+  hrv_rmssd?: number;
+  tags?: string[];
+  notes?: string;
+  sample_format_version?: number;
 }
 
 export interface Sample {
@@ -58,42 +69,145 @@ export interface SettingsBody {
   thresh_still: number;
   baseline_nights: number;
   user_baseline_rmssd: number;
+  // PIN write-only; firmware never returns the plaintext but reports
+  // whether one is set via `pin_set` on the extended endpoint.
+  pin?: string;
+  pin_set?: boolean;
+}
+
+export interface WifiNetwork {
+  ssid: string;
+  rssi: number;
+  enc: string;
+}
+
+export interface AlarmPreview {
+  next_fire_unix: number | null;
+  would_fire_in_s: number | null;
+  reason: string;
+}
+
+export interface SessionPatch {
+  tags?: string[];
+  notes?: string;
 }
 
 class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, {
-    headers: { 'Accept': 'application/json' },
+const TIMEOUT_MS = 10_000;
+const RETRY_DELAY_MS = 500;
+
+function buildSignal(extra?: AbortSignal): AbortSignal {
+  // Compose a 10s timeout with any caller-supplied signal. AbortSignal
+  // .any/.timeout are supported in evergreen browsers; if missing, fall
+  // back to a manual setTimeout abort.
+  type AnyFn = (signals: AbortSignal[]) => AbortSignal;
+  const anySig = (AbortSignal as unknown as { any?: AnyFn }).any;
+  const timeoutSig = (AbortSignal as unknown as { timeout?: (ms: number) => AbortSignal }).timeout;
+  if (typeof timeoutSig === 'function' && typeof anySig === 'function') {
+    const t = timeoutSig(TIMEOUT_MS);
+    return extra ? anySig([t, extra]) : t;
+  }
+  const ctl = new AbortController();
+  const id = setTimeout(() => ctl.abort(), TIMEOUT_MS);
+  if (extra) extra.addEventListener('abort', () => ctl.abort(), { once: true });
+  // Best-effort cleanup; the controller goes out of scope after the
+  // fetch resolves either way.
+  ctl.signal.addEventListener('abort', () => clearTimeout(id), { once: true });
+  return ctl.signal;
+}
+
+async function rawFetch(path: string, init: RequestInit | undefined): Promise<Response> {
+  const merged: RequestInit = {
     ...init,
-  });
+    headers: {
+      'Accept': 'application/json',
+      ...authHeaders(),
+      ...(init?.headers ?? {}),
+    },
+    signal: buildSignal(init?.signal ?? undefined),
+  };
+  return fetch(path, merged);
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  let res: Response;
+  try {
+    res = await rawFetch(path, init);
+  } catch (err) {
+    // Network/timeout — retry once after a short delay.
+    await sleep(RETRY_DELAY_MS);
+    res = await rawFetch(path, init);
+    if (!res.ok) throw new ApiError(res.status, `${res.status} ${res.statusText} ${path}`);
+    void err;
+  }
+  // Single retry on 5xx — server hiccups are common during firmware
+  // boot or long save-to-flash; 4xx are the caller's problem.
+  if (res.status >= 500 && res.status < 600) {
+    await sleep(RETRY_DELAY_MS);
+    res = await rawFetch(path, init);
+  }
+  if (res.status === 401) {
+    pinRequired.value = true;
+    throw new ApiError(401, `unauthorized ${path}`);
+  }
   if (!res.ok) throw new ApiError(res.status, `${res.status} ${res.statusText} ${path}`);
-  return res.json() as Promise<T>;
+  // 204 No Content / empty body — return undefined cast to T.
+  if (res.status === 204) return undefined as unknown as T;
+  const text = await res.text();
+  if (!text) return undefined as unknown as T;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    // Endpoints that return non-JSON shouldn't go through request<T>().
+    throw new ApiError(res.status, `non-json response ${path}`);
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+function jsonInit(method: string, body: unknown): RequestInit {
+  return {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  };
 }
 
 export const api = {
   status:        () => request<DeviceStatus>('/api/status'),
   listSessions:  () => request<{ id: string; summary?: SessionSummary }[]>('/api/sessions'),
   getSession:    (id: string) => request<SessionSummary>(`/api/sessions/${encodeURIComponent(id)}`),
-  deleteSession: (id: string) => request<{ ok: boolean }>(`/api/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  deleteSession: (id: string) => request<{ ok: boolean }>(
+    `/api/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  patchSession:  (id: string, patch: SessionPatch) => request<SessionSummary>(
+    `/api/sessions/${encodeURIComponent(id)}`, jsonInit('PATCH', patch)),
   startSession:  () => request<{ ok: boolean }>('/api/sessions/start', { method: 'POST' }),
   stopSession:   () => request<{ ok: boolean }>('/api/sessions/stop',  { method: 'POST' }),
   getSettings:   () => request<SettingsBody>('/api/settings'),
-  putSettings:   (patch: Partial<SettingsBody>) => fetch('/api/settings', {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(patch),
-  }).then(checkOk),
-  testAlarm:     () => fetch('/api/alarm/test',    { method: 'POST' }).then(checkOk),
-  silenceAlarm:  () => fetch('/api/alarm/silence', { method: 'POST' }).then(checkOk),
-  resetWifi:     () => fetch('/api/wifi/reset',    { method: 'POST' }).then(checkOk),
+  getSettingsExtended: () => request<SettingsBody>('/api/settings?extended=1'),
+  putSettings:   (patch: Partial<SettingsBody>) => request<{ ok: boolean }>(
+    '/api/settings', jsonInit('PUT', patch)),
+  testAlarm:     () => request<{ ok: boolean }>('/api/alarm/test',    { method: 'POST' }),
+  silenceAlarm:  () => request<{ ok: boolean }>('/api/alarm/silence', { method: 'POST' }),
+  alarmPreview:  () => request<AlarmPreview>('/api/alarm/preview'),
+  resetWifi:     () => request<{ ok: boolean }>('/api/wifi/reset', { method: 'POST' }),
+  wifiScan:      () => request<WifiNetwork[]>('/api/wifi/scan'),
+  authCheck:     () => request<void>('/api/auth/check', { method: 'POST' }),
+  otaRollback:   () => request<{ ok: boolean }>('/api/ota/rollback', { method: 'POST' }),
 
   // Binary samples — parsed via DataView. Sample size is 14 packed
   // bytes on-device; we read them with explicit offsets.
   rawSession: async (id: string): Promise<Sample[]> => {
-    const res = await fetch(`/api/sessions/${encodeURIComponent(id)}/raw`);
+    const res = await rawFetch(`/api/sessions/${encodeURIComponent(id)}/raw`, undefined);
+    if (res.status === 401) {
+      pinRequired.value = true;
+      throw new ApiError(401, 'unauthorized raw');
+    }
     if (!res.ok) throw new ApiError(res.status, `raw ${res.status}`);
     const buf = new Uint8Array(await res.arrayBuffer());
     const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
@@ -115,10 +229,5 @@ export const api = {
 
   csvUrl:  (id: string) => `/api/sessions/${encodeURIComponent(id)}.csv`,
 };
-
-async function checkOk(res: Response) {
-  if (!res.ok) throw new ApiError(res.status, `${res.status} ${res.statusText}`);
-  return res.json().catch(() => ({}));
-}
 
 export { ApiError };

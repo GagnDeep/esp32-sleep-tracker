@@ -3,7 +3,9 @@
 @tailwind utilities;
 
 /* OKLCH theme tokens. Dark is the default to match a bedside-friendly
-   palette; .light overrides for daytime use. */
+   palette; the light overrides activate when the user (or theme.ts)
+   sets `data-theme="light"` on <html>. The legacy `.light` class is
+   kept for any places that still use it. */
 :root {
   --surface:       16% 0.012 270;   /* near-black */
   --surface-2:     20% 0.014 270;
@@ -17,9 +19,15 @@
   --stage-deep:    62% 0.14 270;
   --stage-light:   75% 0.12 200;
   --stage-awake:   78% 0.16 60;
+  --motion-fast:   120ms;
+  --motion-normal: 200ms;
+  --motion-slow:   320ms;
   color-scheme: dark;
 }
-.light {
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
+:root[data-theme="light"], .light {
   --surface:       98% 0.005 250;
   --surface-2:     94% 0.008 250;
   --ink:           20% 0.010 270;
@@ -29,6 +37,9 @@
   --good:          55% 0.18 145;
   --warn:          70% 0.16 80;
   --bad:           58% 0.20 25;
+  --stage-deep:    50% 0.16 270;
+  --stage-light:   60% 0.14 200;
+  --stage-awake:   65% 0.18 60;
   color-scheme: light;
 }
 
@@ -52,5 +63,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }

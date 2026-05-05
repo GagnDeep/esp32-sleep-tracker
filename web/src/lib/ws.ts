@@ -1,8 +1,14 @@
-// Auto-reconnect WebSocket with exponential backoff. Pub/sub by event
-// type. UI components subscribe via the `connected`, `sample`, `stage`,
-// `alarm`, and `status` channels.
+// Auto-reconnect WebSocket with jittered exponential backoff. Pub/sub
+// by event type. UI components subscribe via the `connected`, `sample`,
+// `stage`, `alarm`, `status`, and `drops` channels.
 
-import { connectionStatus, liveStats } from './store';
+import {
+  connectionStatus,
+  liveStats,
+  wsDrops,
+  wsRetryAt,
+  wsState,
+} from './store';
 
 type Listener<T> = (msg: T) => void;
 
@@ -13,7 +19,8 @@ export interface SampleEvent {
 export interface StageEvent  { type: 'stage';  value: number; }
 export interface AlarmEvent  { type: 'alarm';  kind: string; }
 export interface StatusEvent { type: 'status'; value: string; }
-export type WsEvent = SampleEvent | StageEvent | AlarmEvent | StatusEvent;
+export interface DropsEvent  { type: 'drops';  count: number; }
+export type WsEvent = SampleEvent | StageEvent | AlarmEvent | StatusEvent | DropsEvent;
 
 const listeners = new Map<WsEvent['type'], Set<Listener<WsEvent>>>();
 
@@ -24,13 +31,27 @@ export function subscribe<K extends WsEvent['type']>(
   if (!set) { set = new Set(); listeners.set(type, set); }
   const generic = fn as Listener<WsEvent>;
   set.add(generic);
-  return () => set!.delete(generic);
+  return () => {
+    const s = listeners.get(type);
+    if (!s) return;
+    s.delete(generic);
+    // Reclaim the Map slot once the last listener is gone so long-lived
+    // pages don't leak empty Sets indefinitely.
+    if (s.size === 0) listeners.delete(type);
+  };
 }
 
 let socket: WebSocket | null = null;
-let backoff = 500;
+let attempt = 0;
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
 let closed = false;
+
+function nextBackoffMs(n: number): number {
+  // Exponential: 500ms, 1s, 2s, 4s, 8s, 15s (cap), with ±30% jitter.
+  const base = Math.min(15_000, 500 * Math.pow(2, n));
+  const jitter = (Math.random() * 0.6 - 0.3) * base; // ±30%
+  return Math.max(0, Math.round(base + jitter));
+}
 
 function dispatch(e: WsEvent) {
   switch (e.type) {
@@ -47,6 +68,9 @@ function dispatch(e: WsEvent) {
     case 'status':
       connectionStatus.value = e.value;
       break;
+    case 'drops':
+      wsDrops.value = e.count;
+      break;
   }
   listeners.get(e.type)?.forEach(fn => fn(e));
 }
@@ -55,10 +79,13 @@ export function connectWs() {
   closed = false;
   function open() {
     if (closed) return;
+    wsState.value = 'connecting';
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     socket = new WebSocket(`${proto}://${location.host}/ws`);
     socket.addEventListener('open', () => {
-      backoff = 500;
+      attempt = 0;
+      wsState.value = 'connected';
+      wsRetryAt.value = null;
       connectionStatus.value = 'connected';
     });
     socket.addEventListener('message', (ev) => {
@@ -69,10 +96,12 @@ export function connectWs() {
       }
     });
     socket.addEventListener('close', () => {
+      wsState.value = 'disconnected';
       connectionStatus.value = 'disconnected';
       if (closed) return;
-      retryTimer = setTimeout(open, backoff);
-      backoff = Math.min(backoff * 2, 15_000);
+      const delay = nextBackoffMs(attempt++);
+      wsRetryAt.value = Date.now() + delay;
+      retryTimer = setTimeout(open, delay);
     });
     socket.addEventListener('error', () => {
       // close handler will run reconnection
@@ -84,6 +113,7 @@ export function connectWs() {
       closed = true;
       if (retryTimer) clearTimeout(retryTimer);
       socket?.close();
+      wsRetryAt.value = null;
     },
   };
 }
