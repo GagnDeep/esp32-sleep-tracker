@@ -44,6 +44,22 @@ export function subscribe<K extends WsEvent['type']>(
   };
 }
 
+// Test-only inspection helpers. Not part of the public surface; we
+// keep them out of the runtime path so they cost nothing in
+// production but let unit tests assert that unsubscribe really frees
+// the Map slot rather than leaking an empty Set.
+export const __test = {
+  listenerTypeCount(): number {
+    return listeners.size;
+  },
+  hasType(type: WsEvent['type']): boolean {
+    return listeners.has(type);
+  },
+  dispatch(e: WsEvent): void {
+    dispatch(e);
+  },
+};
+
 let socket: WebSocket | null = null;
 let attempt = 0;
 let retryTimer: ReturnType<typeof setTimeout> | null = null;

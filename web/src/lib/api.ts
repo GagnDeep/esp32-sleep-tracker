@@ -182,6 +182,29 @@ function jsonInit(method: string, body: unknown): RequestInit {
   };
 }
 
+// Pure binary parser for the 14-byte sample stride. Exposed so unit
+// tests can round-trip canned bytes without going through fetch.
+// Trailing partial frames are dropped silently — the firmware writes
+// in 14-byte units, so any stub byte means EOF mid-write.
+export const SAMPLE_STRIDE = 14;
+
+export function parseSamples(bytes: Uint8Array): Sample[] {
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const out: Sample[] = [];
+  for (let i = 0; i + SAMPLE_STRIDE <= bytes.length; i += SAMPLE_STRIDE) {
+    out.push({
+      t_ms:     dv.getUint32(i,      true),
+      hr_bpm:   dv.getUint16(i + 4,  true),
+      spo2_x10: dv.getUint16(i + 6,  true),
+      activity: dv.getUint16(i + 8,  true),
+      stage:    dv.getUint8 (i + 10),
+      flags:    dv.getUint8 (i + 11),
+      // bytes 12-13 reserved
+    });
+  }
+  return out;
+}
+
 export const api = {
   status:        () => request<DeviceStatus>('/api/status'),
   listSessions:  () => request<{ id: string; summary?: SessionSummary }[]>('/api/sessions'),
@@ -204,8 +227,9 @@ export const api = {
   authCheck:     () => request<void>('/api/auth/check', { method: 'POST' }),
   otaRollback:   () => request<{ ok: boolean }>('/api/ota/rollback', { method: 'POST' }),
 
-  // Binary samples — parsed via DataView. Sample size is 14 packed
-  // bytes on-device; we read them with explicit offsets.
+  // Binary samples — fetches the raw stream, then defers parsing to the
+  // pure helper below so unit tests can exercise the wire format
+  // without standing up a fake fetch.
   rawSession: async (id: string): Promise<Sample[]> => {
     const res = await rawFetch(`/api/sessions/${encodeURIComponent(id)}/raw`, undefined);
     if (res.status === 401) {
@@ -214,21 +238,7 @@ export const api = {
     }
     if (!res.ok) throw new ApiError(res.status, `raw ${res.status}`);
     const buf = new Uint8Array(await res.arrayBuffer());
-    const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
-    const out: Sample[] = [];
-    const STRIDE = 14;
-    for (let i = 0; i + STRIDE <= buf.length; i += STRIDE) {
-      out.push({
-        t_ms:     dv.getUint32(i,      true),
-        hr_bpm:   dv.getUint16(i + 4,  true),
-        spo2_x10: dv.getUint16(i + 6,  true),
-        activity: dv.getUint16(i + 8,  true),
-        stage:    dv.getUint8 (i + 10),
-        flags:    dv.getUint8 (i + 11),
-        // bytes 12-13 reserved
-      });
-    }
-    return out;
+    return parseSamples(buf);
   },
 
   csvUrl:  (id: string) => `/api/sessions/${encodeURIComponent(id)}.csv`,

@@ -43,17 +43,44 @@ Data format for DIY analysis: [`docs/data-format.md`](docs/data-format.md).
 - `docs/` — wiring diagrams, flashing notes, data format reference.
 - `tools/analyze.py` — optional offline analysis of CSV exports.
 
+## Features
+
+- [x] Live HR / SpO₂ / activity stream over WebSockets (1 Hz)
+- [x] Heuristic sleep staging (awake / light / deep)
+- [x] Smart-alarm window with day-mask + volume ramp + breathing exercise (4-7-8)
+- [x] Multi-night history with sortable / searchable list
+- [x] 28-day Trends view with 7-day rolling average
+- [x] Compare two sessions side-by-side
+- [x] Session tags (sick / workout / alcohol / travel / caffeine / medication) + free-form notes
+- [x] CSV + raw-binary export per session
+- [x] Dark / light theme switcher (persists in `localStorage`)
+- [x] Timezone-aware rendering (preset list + custom IANA id)
+- [x] Optional 4-digit PIN auth for mutating endpoints
+- [x] OTA firmware update with MD5 verification + 30 s pending-verify rollback
+- [x] Manual `POST /api/ota/rollback` to revert to the previous partition
+- [x] Crash-recovery via `<id>.start` anchor file (correct UTC start after power loss)
+- [x] Sidecar schema v2 (`tags`, `notes`, `started_at_unix`, `tz_offset_min`, `hrv_rmssd`, ...)
+- [x] WiFi scan with signal bars during setup
+- [x] Task watchdog (10 s) on sensor + pipeline tasks
+- [x] WebSocket back-pressure with per-client drop counter (`ws_drops` in `/api/status`)
+- [x] Atomic `settings.json` save with CRC32 + `.bak` fallback
+
 ## Screenshots
 
-> _Screenshots coming soon — flash a unit and the SPA will look ~much~
-> better with real data behind it._
+> _Dark / light mode screenshots:_
+> ![Dark mode](docs/screenshots/dark.png)
+> ![Light mode](docs/screenshots/light.png)
+>
+> _(Drop the renders into `docs/screenshots/` once you have a built
+> unit; the placeholders are intentionally not committed.)_
 
 ## Documentation
 
-- [`docs/wiring.md`](docs/wiring.md) — pin map, ASCII diagram.
-- [`docs/flashing.md`](docs/flashing.md) — first flash, OTA, troubleshooting.
-- [`docs/data-format.md`](docs/data-format.md) — `Sample` layout, sidecar JSON, CSV columns.
-- [`tools/analyze.py`](tools/analyze.py) — plot a CSV export with matplotlib.
+- [`docs/wiring.md`](docs/wiring.md) — pin map, ASCII diagram, watchdog + PIN notes.
+- [`docs/flashing.md`](docs/flashing.md) — first flash, OTA + rollback, PIN auth.
+- [`docs/data-format.md`](docs/data-format.md) — `Sample` layout, schema v2 sidecar JSON, anchor file, settings CRC.
+- [`docs/troubleshooting.md`](docs/troubleshooting.md) — `ws_drops`, watchdog, anchor recovery, SD eject behaviour, factory reset.
+- [`tools/analyze.py`](tools/analyze.py) — plot a CSV export with matplotlib (renders tags in the title).
 
 ## License
 
