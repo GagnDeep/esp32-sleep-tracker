@@ -5,6 +5,7 @@ import { ThemeToggle } from './ThemeToggle';
 const items = [
   { href: '/',         label: 'Live' },
   { href: '/history',  label: 'History' },
+  { href: '/trends',   label: 'Trends' },
   { href: '/alarm',    label: 'Alarm' },
   { href: '/settings', label: 'Settings' },
 ];

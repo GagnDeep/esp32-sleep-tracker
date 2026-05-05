@@ -3,6 +3,7 @@ import { useLocation } from 'preact-iso';
 const tabs = [
   { href: '/',         label: 'Live',     icon: '◐' },
   { href: '/history',  label: 'History',  icon: '☷' },
+  { href: '/trends',   label: 'Trends',   icon: '∿' },
   { href: '/alarm',    label: 'Alarm',    icon: '⏰' },
   { href: '/settings', label: 'Settings', icon: '⚙' },
 ];

@@ -3,7 +3,9 @@ import { LocationProvider, Router, Route, useLocation } from 'preact-iso';
 import { NavShell } from './components/nav/NavShell';
 import { Live } from './routes/Live';
 import { History } from './routes/History';
+import { Trends } from './routes/Trends';
 import { SessionDetail } from './routes/SessionDetail';
+import { Compare } from './routes/Compare';
 import { Alarm } from './routes/Alarm';
 import { Settings } from './routes/Settings';
 import { Setup } from './routes/Setup';
@@ -43,6 +45,8 @@ export function App() {
         <Router>
           <Route path="/"             component={Live} />
           <Route path="/history"      component={History} />
+          <Route path="/trends"       component={Trends} />
+          <Route path="/compare"      component={Compare} />
           <Route path="/sessions/:id" component={SessionDetail} />
           <Route path="/alarm"        component={Alarm} />
           <Route path="/settings"     component={Settings} />

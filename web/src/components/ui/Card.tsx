@@ -2,7 +2,7 @@ import type { JSX, ComponentChildren } from 'preact';
 
 interface Props extends JSX.HTMLAttributes<HTMLElement> {
   title?: string;
-  hint?: string;
+  hint?: ComponentChildren;
   children?: ComponentChildren;
 }
 
