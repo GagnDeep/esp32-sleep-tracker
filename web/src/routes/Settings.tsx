@@ -4,6 +4,7 @@ import { api, type SettingsBody } from '../lib/api';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { deviceStatus } from '../lib/store';
+import { notify } from '../lib/toast';
 
 export function Settings() {
   const [s, setS] = useState<SettingsBody | null>(null);
@@ -29,9 +30,9 @@ export function Settings() {
       form.append('firmware', file, file.name);
       const res = await fetch('/api/ota', { method: 'POST', body: form });
       if (!res.ok) throw new Error(`OTA failed: ${res.status}`);
-      alert('Firmware accepted. Device is rebooting.');
+      notify('success', 'Firmware accepted. Device is rebooting.');
     } catch (err) {
-      alert(`OTA failed: ${(err as Error).message}`);
+      notify('error', `OTA failed: ${(err as Error).message}`);
     } finally {
       setOtaBusy(false);
       input.value = '';

@@ -1,5 +1,6 @@
 import { useLocation } from 'preact-iso';
 import { StatusBadge } from '../StatusBadge';
+import { ThemeToggle } from './ThemeToggle';
 
 const items = [
   { href: '/',         label: 'Live' },
@@ -12,9 +13,12 @@ export function Sidebar() {
   const { path } = useLocation();
   return (
     <aside class="hidden md:flex md:flex-col md:gap-6 w-56 shrink-0 p-4 sticky top-0 h-dvh">
-      <div class="px-2">
-        <span class="block text-base font-semibold tracking-tight">Sleep Tracker</span>
-        <StatusBadge />
+      <div class="px-2 flex items-start justify-between gap-2">
+        <div>
+          <span class="block text-base font-semibold tracking-tight">Sleep Tracker</span>
+          <StatusBadge />
+        </div>
+        <ThemeToggle />
       </div>
       <nav aria-label="Primary">
         <ul class="flex flex-col gap-1">
