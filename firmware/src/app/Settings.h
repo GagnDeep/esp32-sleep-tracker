@@ -1,6 +1,8 @@
 #pragma once
 #include <Arduino.h>
 #include <stdint.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 
 // JSON-backed user settings (LittleFS /settings.json). All UI-facing
 // configuration goes here so it survives reboots without re-flashing.
@@ -36,16 +38,26 @@ class Settings {
   uint8_t  baselineNights = 0;
   uint16_t userBaselineRmssd = 0;          // ms
 
+  // Optional 4-digit PIN for mutating endpoints (empty = open).
+  String   pin            = "";
+
   // ---- IO --------------------------------------------------------------
   bool load();
-  bool save();           // immediate
+  bool save();           // immediate (atomic: tmp + rename, with .bak)
   void requestSave();    // debounced; call from settings PUT handler
   void tick();           // call from loop/task to flush debounced save
 
+  void setPin(const String& p)  { pin = p; requestSave(); }
+  void clearPin()               { pin = ""; requestSave(); }
+
  private:
-  String  toJson() const;
+  String  toJson(uint32_t crc) const;
+  String  toJsonNoCrc() const;
   bool    fromJson(const String& json);
+  bool    loadFromPath(const char* path);
+
   uint32_t pendingSaveAt_ = 0;
+  SemaphoreHandle_t mutex_ = nullptr;
 };
 
 extern Settings settings;

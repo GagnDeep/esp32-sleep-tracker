@@ -1,5 +1,6 @@
 #include "ApiHandlers.h"
 #include "WifiProvisioner.h"
+#include "WsBroadcaster.h"
 #include "../app/SessionManager.h"
 #include "../app/Settings.h"
 #include "../app/AlarmController.h"
@@ -10,6 +11,7 @@
 #include "version.h"
 #include <ArduinoJson.h>
 #include <AsyncJson.h>
+#include <math.h>
 
 extern SessionStore sessionStore;
 extern AlarmController alarmController;
@@ -124,6 +126,7 @@ void registerRoutes(AsyncWebServer& s) {
     d["live"]["stage"]    = sessionManager.stage();
     d["live"]["flags"]    = sessionManager.flags();
     d["calibration_nights_done"] = settings.baselineNights;
+    d["ws_drops"]         = ws_broadcaster::dropCount();
     String out; serializeJson(d, out);
     sendJson(req, 200, out);
   });
@@ -213,19 +216,79 @@ void registerRoutes(AsyncWebServer& s) {
   auto putSettings = new AsyncCallbackJsonWebHandler(
     "/api/settings", [](AsyncWebServerRequest* req, JsonVariant& v) {
       JsonObject o = v.as<JsonObject>();
+
+      // Validate every field that is present, then commit atomically.
+      // Reject the entire request on the first invalid field — partial
+      // application would leave the device in an unpredictable state.
+      auto reject = [&](const char* field) {
+        String body = String("{\"error\":\"invalid_field\",\"field\":\"") + field + "\"}";
+        sendJson(req, 400, body);
+      };
+
+      // Integer ranges.
+      if (o["alarm_start_min"].is<JsonVariant>()) {
+        int x = o["alarm_start_min"].as<int>();
+        if (x < 0 || x > 1439) return reject("alarm_start_min");
+      }
+      if (o["alarm_end_min"].is<JsonVariant>()) {
+        int x = o["alarm_end_min"].as<int>();
+        if (x < 0 || x > 1439) return reject("alarm_end_min");
+      }
+      if (o["spo2_sustain_s"].is<JsonVariant>()) {
+        int x = o["spo2_sustain_s"].as<int>();
+        if (x < 5 || x > 600) return reject("spo2_sustain_s");
+      }
+      if (o["led_brightness"].is<JsonVariant>()) {
+        int x = o["led_brightness"].as<int>();
+        if (x < 0 || x > 255) return reject("led_brightness");
+      }
+      if (o["spo2_low_x10"].is<JsonVariant>()) {
+        int x = o["spo2_low_x10"].as<int>();
+        if (x < 700 || x > 1000) return reject("spo2_low_x10");
+      }
+      if (o["alarm_days"].is<JsonVariant>()) {
+        int x = o["alarm_days"].as<int>();
+        if (x < 0 || x > 0x7F) return reject("alarm_days");
+      }
+      if (o["thresh_motion"].is<JsonVariant>()) {
+        int x = o["thresh_motion"].as<int>();
+        if (x < 0 || x > 1000) return reject("thresh_motion");
+      }
+      if (o["thresh_still"].is<JsonVariant>()) {
+        int x = o["thresh_still"].as<int>();
+        if (x < 0 || x > 1000) return reject("thresh_still");
+      }
+      if (o["spo2_cal_a"].is<JsonVariant>()) {
+        float x = o["spo2_cal_a"].as<float>();
+        if (!isfinite(x)) return reject("spo2_cal_a");
+      }
+      if (o["spo2_cal_b"].is<JsonVariant>()) {
+        float x = o["spo2_cal_b"].as<float>();
+        if (!isfinite(x)) return reject("spo2_cal_b");
+      }
+      if (o["pin"].is<const char*>()) {
+        String p = String((const char*)o["pin"]);
+        if (p.length() != 0 && p.length() != 4) return reject("pin");
+        for (size_t i = 0; i < p.length(); ++i) {
+          if (p[i] < '0' || p[i] > '9') return reject("pin");
+        }
+      }
+
+      // All present fields validated — commit.
       if (o["device_name"].is<const char*>())   settings.deviceName     = String((const char*)o["device_name"]);
       if (o["timezone"].is<const char*>())      { settings.timezone = String((const char*)o["timezone"]); timeservice::setTimezone(settings.timezone.c_str()); }
       if (o["alarm_enabled"].is<bool>())        settings.alarmEnabled   = o["alarm_enabled"];
-      if (o["alarm_start_min"].is<uint16_t>())  settings.alarmStartMin  = o["alarm_start_min"];
-      if (o["alarm_end_min"].is<uint16_t>())    settings.alarmEndMin    = o["alarm_end_min"];
-      if (o["alarm_days"].is<uint8_t>())        settings.alarmDays      = o["alarm_days"];
-      if (o["spo2_low_x10"].is<uint16_t>())     settings.spo2LowX10     = o["spo2_low_x10"];
-      if (o["spo2_sustain_s"].is<uint16_t>())   settings.spo2SustainS   = o["spo2_sustain_s"];
-      if (o["led_brightness"].is<uint8_t>())    settings.ledBrightness  = o["led_brightness"];
-      if (o["spo2_cal_a"].is<float>())          settings.spo2CalA       = o["spo2_cal_a"];
-      if (o["spo2_cal_b"].is<float>())          settings.spo2CalB       = o["spo2_cal_b"];
-      if (o["thresh_motion"].is<uint16_t>())    settings.threshMotion   = o["thresh_motion"];
-      if (o["thresh_still"].is<uint16_t>())     settings.threshStill    = o["thresh_still"];
+      if (o["alarm_start_min"].is<JsonVariant>()) settings.alarmStartMin = (uint16_t)o["alarm_start_min"].as<int>();
+      if (o["alarm_end_min"].is<JsonVariant>())   settings.alarmEndMin   = (uint16_t)o["alarm_end_min"].as<int>();
+      if (o["alarm_days"].is<JsonVariant>())      settings.alarmDays     = (uint8_t)o["alarm_days"].as<int>();
+      if (o["spo2_low_x10"].is<JsonVariant>())    settings.spo2LowX10    = (uint16_t)o["spo2_low_x10"].as<int>();
+      if (o["spo2_sustain_s"].is<JsonVariant>())  settings.spo2SustainS  = (uint16_t)o["spo2_sustain_s"].as<int>();
+      if (o["led_brightness"].is<JsonVariant>())  settings.ledBrightness = (uint8_t)o["led_brightness"].as<int>();
+      if (o["spo2_cal_a"].is<JsonVariant>())      settings.spo2CalA      = o["spo2_cal_a"].as<float>();
+      if (o["spo2_cal_b"].is<JsonVariant>())      settings.spo2CalB      = o["spo2_cal_b"].as<float>();
+      if (o["thresh_motion"].is<JsonVariant>())   settings.threshMotion  = (uint16_t)o["thresh_motion"].as<int>();
+      if (o["thresh_still"].is<JsonVariant>())    settings.threshStill   = (uint16_t)o["thresh_still"].as<int>();
+      if (o["pin"].is<const char*>())             settings.pin           = String((const char*)o["pin"]);
       settings.requestSave();
       sendJson(req, 200, "{\"ok\":true}");
     });
