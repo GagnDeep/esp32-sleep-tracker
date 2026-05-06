@@ -199,10 +199,15 @@ void handleRpc(const uint8_t* p, uint8_t len) {
     case RPC_SCAN_WIFI: {
       const int n = WiFi.scanNetworks(false, true);
       for (int i = 0; i < n; ++i) {
-        char rssiStr[8]; snprintf(rssiStr, sizeof(rssiStr), "%d", WiFi.RSSI(i));
+        // Hold the SSID String alive across the sendRpcResult call —
+        // calling c_str() on a temporary returned by WiFi.SSID(i)
+        // gives a dangling pointer the moment the temp dies.
+        String ssid = WiFi.SSID(i);
+        char rssiStr[8];
+        snprintf(rssiStr, sizeof(rssiStr), "%d", WiFi.RSSI(i));
         const bool secure = WiFi.encryptionType(i) != WIFI_AUTH_OPEN;
         const char* strs[] = {
-          WiFi.SSID(i).c_str(),
+          ssid.c_str(),
           rssiStr,
           secure ? "YES" : "NO",
         };
