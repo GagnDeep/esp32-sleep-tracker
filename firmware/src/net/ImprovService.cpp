@@ -6,6 +6,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <esp_log.h>
+#include <esp_wifi.h>
 
 // Improv-Serial protocol implementation. Spec:
 //   https://www.improv-wifi.com/serial/
@@ -104,27 +105,39 @@ void sendRpcResult(uint8_t command, const char* const* strs, size_t n) {
 uint8_t s_lastConnectStatus = 0;
 
 bool tryConnect(const char* ssid, const char* pass, uint32_t timeoutMs) {
-  // Tear the captive-portal AP down and force STA-only mode. The C3's
-  // single radio can struggle to associate cleanly while it is also
-  // bridging an active SoftAP. Wait briefly for the mode change to
-  // settle.
+  // Minimal-touch approach: just close the AP and ask WiFi to begin.
+  // The previous aggressive sequence (WiFi.disconnect(true, true) then
+  // mode change then begin) was sometimes leaving the radio in an
+  // ambiguous half-initialised state.
   WiFi.softAPdisconnect(true);
-  WiFi.disconnect(true /*wifi off*/, true /*erase ap*/);
-  delay(200);
-  WiFi.mode(WIFI_STA);
-  delay(200);
+  WiFi.mode(WIFI_AP_STA);  // keep STA capability while AP is going down
+  delay(100);
 
-  // Defensive settings against AUTH_EXPIRE on home routers:
-  //  - turn off STA-side modem sleep (some APs drop slow-handshake clients)
-  //  - allow association with WEP/OPEN security floors so we don't
-  //    silently reject mid-tier consumer routers that announce odd flags
-  //  - max TX power for weak 2.4 GHz neighbourhoods
   WiFi.setSleep(false);
-  WiFi.setMinSecurity(WIFI_AUTH_WEP);
-  WiFi.setTxPower(WIFI_POWER_19_5dBm);
-
   WiFi.setAutoReconnect(true);
-  WiFi.begin(ssid, pass);
+
+  // Pull the AP's channel from the cached scan and pass it to
+  // WiFi.begin so the radio jumps straight to the right channel.
+  int channel = 0;
+  uint8_t bssid_buf[6] = {0};
+  uint8_t* bssid = nullptr;
+  const int n = WiFi.scanComplete();
+  for (int i = 0; i < n; ++i) {
+    if (WiFi.SSID(i) == String(ssid)) {
+      channel = WiFi.channel(i);
+      memcpy(bssid_buf, WiFi.BSSID(i), 6);
+      bssid = bssid_buf;
+      break;
+    }
+  }
+
+  if (channel > 0) {
+    Serial0.printf("[improv] connect ssid=%s ch=%d\n", ssid, channel);
+    WiFi.begin(ssid, pass, channel, bssid);
+  } else {
+    Serial0.printf("[improv] connect ssid=%s (channel unknown)\n", ssid);
+    WiFi.begin(ssid, pass);
+  }
 
   const uint32_t deadline = millis() + timeoutMs;
   uint8_t lastStatus = 0xFF;
