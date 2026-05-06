@@ -21,6 +21,12 @@ void setLevel(Level lvl);
 Level level();
 void writeLine(Level lvl, const char* tag, const char* fmt, ...);
 
+// Mute all Serial writes from this logger AND from the ESP-IDF system
+// log. Used during Improv-Serial provisioning so log spam does not
+// interleave with the binary protocol bytes on the same USB-CDC link.
+void setSilent(bool silent);
+bool silent();
+
 }  // namespace logging
 
 #define LOG_ERROR(tag, fmt, ...) ::logging::writeLine(::logging::LEVEL_ERROR, tag, fmt, ##__VA_ARGS__)

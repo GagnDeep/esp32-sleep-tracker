@@ -72,6 +72,10 @@ static void alarmTask(void* /*arg*/) {
 
 void setup() {
   logging::begin(115200);
+  // Silence all Serial output until WiFi is up. Improv-Serial uses
+  // the same USB-CDC link for binary frames, and any interleaved log
+  // line would corrupt its handshake. Once provisioned, logs resume.
+  logging::setSilent(true);
   delay(50);
   LOG_INFO(TAG, "boot — fw=%s built=%s", FIRMWARE_VERSION, FIRMWARE_BUILD_DATE);
 
@@ -113,6 +117,12 @@ void setup() {
     // begin() reboots on failure; we won't get here.
     return;
   }
+
+  // WiFi is up — installer (if any) has already received its
+  // RPC_RESULT, so the channel is free. Restore normal logging.
+  logging::setSilent(false);
+  LOG_INFO(TAG, "wifi up: ssid=%s ip=%s",
+           wifi::ssid().c_str(), wifi::ip().c_str());
 
   if (!MDNS.begin(cfg::MDNS_HOSTNAME)) {
     LOG_WARN(TAG, "mDNS start failed");
