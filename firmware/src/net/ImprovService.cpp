@@ -53,7 +53,8 @@ bool s_provisioned = false;
 
 uint8_t s_rxBuf[MAGIC_LEN + 4 + MAX_PAYLOAD];
 size_t  s_rxLen = 0;
-uint32_t s_lastRxMs = 0;  // last time bytes arrived from host
+uint32_t s_lastRxMs = 0;        // last time bytes arrived from host
+uint32_t s_lastAnnounceMs = 0;  // last time we shouted CURRENT_STATE
 bool s_hostActive = false;
 
 void sendFrame(uint8_t type, const uint8_t* payload, uint8_t len) {
@@ -292,7 +293,23 @@ void tick() {
     logging::setSilent(false);
   }
 
-  if (s_rxLen >= MAGIC_LEN + 4) parseFrame();
+  // Process as many complete frames as the buffer holds — handles the
+  // case where a host sends back-to-back frames and the previous
+  // single-shot parseFrame() left some trailing bytes unparsed.
+  size_t prev = ~size_t{0};
+  while (s_rxLen >= MAGIC_LEN + 4 && s_rxLen != prev) {
+    prev = s_rxLen;
+    parseFrame();
+  }
+
+  // Periodic READY announcement so passive-listening hosts (some
+  // versions of improv-wifi-serial-sdk only listen, never probe) can
+  // detect the device after they open the port.
+  const uint32_t now = millis();
+  if (now - s_lastAnnounceMs > 1500) {
+    s_lastAnnounceMs = now;
+    sendCurrentState(STATE_READY);
+  }
 }
 
 bool isProvisioned() {
