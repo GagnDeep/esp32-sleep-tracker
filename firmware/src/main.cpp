@@ -22,6 +22,7 @@
 #include "net/WebServer.h"
 #include "net/WsBroadcaster.h"
 #include "net/OtaService.h"
+#include "net/ImprovService.h"
 
 namespace { constexpr const char* TAG = "main"; }
 
@@ -90,6 +91,16 @@ void setup() {
   settings.load();
   timeservice::setTimezone(settings.timezone.c_str());
 
+  // Improv-Serial: listen on USB-CDC for browser-installer provisioning.
+  // Runs in parallel with the WiFiManager captive-portal flow below.
+  improv::begin(settings.deviceName.c_str(), FIRMWARE_VERSION);
+  xTaskCreate([](void*) {
+    while (true) {
+      improv::tick();
+      vTaskDelay(pdMS_TO_TICKS(10));
+    }
+  }, "improv", 4096, nullptr, 1, nullptr);
+
   i2cbus::init();
   sensors.begin();
   sessionStore.begin();          // also finalises orphan sessions
@@ -116,7 +127,14 @@ void setup() {
   // Arm the OTA pending-verify watchdog (no-op if no pending marker).
   otaservice::begin();
 
-  xTaskCreatePinnedToCore(sensorTask,   "sensor",   8192, nullptr, 3, nullptr, 1);
+  // Pin sensor task to the high-perf core (1) on dual-core ESP32; on
+  // single-core ESP32-C3 we fall back to core 0 (the only one).
+#if defined(CONFIG_FREERTOS_UNICORE) || defined(CONFIG_IDF_TARGET_ESP32C3)
+  constexpr BaseType_t kSensorCore = 0;
+#else
+  constexpr BaseType_t kSensorCore = 1;
+#endif
+  xTaskCreatePinnedToCore(sensorTask,   "sensor",   8192, nullptr, 3, nullptr, kSensorCore);
   xTaskCreatePinnedToCore(pipelineTask, "pipeline", 8192, nullptr, 2, nullptr, 0);
   xTaskCreatePinnedToCore(stagerTask,   "stager",   4096, nullptr, 1, nullptr, 0);
   xTaskCreatePinnedToCore(alarmTask,    "alarm",    4096, nullptr, 1, nullptr, 0);

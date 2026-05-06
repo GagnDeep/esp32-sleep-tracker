@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sleep Tracker · One-click installer</title>
+  <meta name="description" content="Flash and provision your ESP32-C3 sleep tracker from the browser." />
+  <style>
+    :root {
+      --bg: #0b0d10;
+      --bg-2: #14171c;
+      --ink: #e6e9ee;
+      --ink-muted: #8b95a3;
+      --accent: #7aa2f7;
+      --border: #1f242c;
+      --good: #9ece6a;
+      --warn: #e0af68;
+      --bad: #f7768e;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #f8fafc;
+        --bg-2: #ffffff;
+        --ink: #0f172a;
+        --ink-muted: #475569;
+        --border: #e2e8f0;
+      }
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+      background: var(--bg); color: var(--ink);
+      line-height: 1.55;
+    }
+    main {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 56px 24px 96px;
+    }
+    h1 {
+      font-size: 2rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin: 0 0 8px;
+    }
+    .tag {
+      display: inline-block;
+      font-size: 0.75rem;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      padding: 4px 10px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      color: var(--ink-muted);
+      margin-bottom: 16px;
+    }
+    p { color: var(--ink-muted); }
+    .card {
+      background: var(--bg-2);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 24px;
+      margin: 24px 0;
+    }
+    .install-row {
+      display: flex;
+      gap: 16px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    esp-web-install-button[install-supported] .unsupported {
+      display: none;
+    }
+    .unsupported {
+      color: var(--bad);
+      font-size: 0.875rem;
+      max-width: 380px;
+    }
+    ol { padding-left: 22px; }
+    ol li { margin-bottom: 8px; }
+    code {
+      background: var(--bg);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 0.875em;
+      border: 1px solid var(--border);
+    }
+    a { color: var(--accent); }
+    footer {
+      margin-top: 64px;
+      font-size: 0.875rem;
+      color: var(--ink-muted);
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+      margin-top: 16px;
+    }
+    .feat {
+      padding: 12px 16px;
+      background: var(--bg-2);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      font-size: 0.9rem;
+    }
+    .feat strong { display: block; color: var(--ink); margin-bottom: 4px; }
+  </style>
+</head>
+<body>
+  <main>
+    <span class="tag">v0.2.0-dev · ESP32-C3</span>
+    <h1>Sleep Tracker installer</h1>
+    <p>
+      Flash the firmware, hand over your WiFi, and land on the device's
+      web app — without touching a terminal. Plug in your ESP32-C3
+      board over USB and click below.
+    </p>
+
+    <div class="card">
+      <div class="install-row">
+        <esp-web-install-button manifest="./manifest.json">
+          <button slot="activate" style="
+            background: var(--accent);
+            color: #0b0d10;
+            border: 0;
+            padding: 12px 20px;
+            font-weight: 600;
+            font-size: 0.95rem;
+            border-radius: 10px;
+            cursor: pointer;
+          ">⚡  Connect & install</button>
+          <span slot="unsupported" class="unsupported">
+            Your browser does not support flashing over USB.
+            Use desktop Chrome, Edge or Opera.
+          </span>
+          <span slot="not-allowed" class="unsupported">
+            This page must be served over HTTPS for browser flashing
+            to work. Open the GitHub Pages copy.
+          </span>
+        </esp-web-install-button>
+        <span style="color: var(--ink-muted); font-size: 0.875rem;">
+          Chrome / Edge / Opera on desktop · Chrome on Android.
+        </span>
+      </div>
+    </div>
+
+    <h2 style="font-size: 1.1rem; margin-top: 32px;">What this does</h2>
+    <ol>
+      <li>Detects your ESP32-C3 over its native USB serial port.</li>
+      <li>Flashes the merged firmware image (~4 MB) to the board.</li>
+      <li>Picks your home WiFi from a scan and sends it to the device
+          over the same USB cable using the
+          <a href="https://www.improv-wifi.com/serial/">Improv-Serial</a>
+          protocol.</li>
+      <li>Redirects you to the device's local web UI once it joins
+          your network — typically <code>http://sleep-tracker.local/</code>.</li>
+    </ol>
+
+    <h2 style="font-size: 1.1rem;">Wiring</h2>
+    <p>One sensor, four wires:</p>
+    <div class="grid">
+      <div class="feat"><strong>MAX30102 VIN</strong>3V3 pin</div>
+      <div class="feat"><strong>MAX30102 GND</strong>GND</div>
+      <div class="feat"><strong>MAX30102 SDA</strong>GPIO 4</div>
+      <div class="feat"><strong>MAX30102 SCL</strong>GPIO 5</div>
+    </div>
+
+    <footer>
+      <a href="https://github.com/GagnDeep/esp32-sleep-tracker">Source on GitHub</a> ·
+      Built with <a href="https://esphome.github.io/esp-web-tools/">ESP Web Tools</a>.
+    </footer>
+  </main>
+
+  <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
+</body>
+</html>

@@ -35,3 +35,6 @@ web/coverage/
 .env
 .env.local
 *.pem
+
+# Claude Code local runtime state
+.claude/
