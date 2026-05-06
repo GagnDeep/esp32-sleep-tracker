@@ -131,13 +131,28 @@ bool tryConnect(const char* ssid, const char* pass, uint32_t timeoutMs) {
     }
   }
 
+  // Bypass arduino-esp32 WiFi.begin and configure the driver directly
+  // so we can disable PMF capability entirely. Some phone hotspots
+  // and consumer routers reject auth from clients that advertise PMF
+  // when the AP itself does not support it, manifesting as AUTH_EXPIRE.
+  wifi_config_t wcfg = {};
+  strncpy((char*)wcfg.sta.ssid, ssid, sizeof(wcfg.sta.ssid) - 1);
+  strncpy((char*)wcfg.sta.password, pass, sizeof(wcfg.sta.password) - 1);
+  wcfg.sta.threshold.authmode = WIFI_AUTH_WPA_WPA2_PSK;
+  wcfg.sta.pmf_cfg.capable = false;   // do not advertise PMF capability
+  wcfg.sta.pmf_cfg.required = false;
   if (channel > 0) {
-    Serial0.printf("[improv] connect ssid=%s ch=%d\n", ssid, channel);
-    WiFi.begin(ssid, pass, channel, bssid);
-  } else {
-    Serial0.printf("[improv] connect ssid=%s (channel unknown)\n", ssid);
-    WiFi.begin(ssid, pass);
+    wcfg.sta.channel = (uint8_t)channel;
+    if (bssid) {
+      memcpy(wcfg.sta.bssid, bssid, 6);
+      wcfg.sta.bssid_set = true;
+    }
   }
+  esp_wifi_set_mode(WIFI_MODE_STA);
+  esp_wifi_set_config(WIFI_IF_STA, &wcfg);
+  Serial0.printf("[improv] connect ssid=%s ch=%d pmf=off\n", ssid, channel);
+  esp_wifi_start();
+  esp_wifi_connect();
 
   const uint32_t deadline = millis() + timeoutMs;
   uint8_t lastStatus = 0xFF;
