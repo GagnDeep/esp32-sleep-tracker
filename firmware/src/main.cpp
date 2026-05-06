@@ -96,14 +96,16 @@ void setup() {
   timeservice::setTimezone(settings.timezone.c_str());
 
   // Improv-Serial: listen on USB-CDC for browser-installer provisioning.
-  // Runs in parallel with the WiFiManager captive-portal flow below.
+  // Started early (before sensor / SD / web init) so the SDK probe
+  // wins the race against any boot work that could otherwise delay
+  // our first response past its ~1 s timeout.
   improv::begin(settings.deviceName.c_str(), FIRMWARE_VERSION);
   xTaskCreate([](void*) {
     while (true) {
       improv::tick();
-      vTaskDelay(pdMS_TO_TICKS(10));
+      vTaskDelay(pdMS_TO_TICKS(5));
     }
-  }, "improv", 4096, nullptr, 1, nullptr);
+  }, "improv", 4096, nullptr, 2, nullptr);
 
   i2cbus::init();
   sensors.begin();
@@ -118,8 +120,11 @@ void setup() {
     return;
   }
 
-  // WiFi is up — installer (if any) has already received its
-  // RPC_RESULT, so the channel is free. Restore normal logging.
+  // WiFi is up. If we got here via Improv, the SDK has already
+  // received its RPC_RESULT and disconnected — the channel is free
+  // and the improv tick() will re-mute on any future host activity.
+  // For users who came in via the captive portal, this also restores
+  // visibility for `pio device monitor`.
   logging::setSilent(false);
   LOG_INFO(TAG, "wifi up: ssid=%s ip=%s",
            wifi::ssid().c_str(), wifi::ip().c_str());

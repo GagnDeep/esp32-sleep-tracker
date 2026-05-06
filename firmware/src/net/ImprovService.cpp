@@ -5,6 +5,7 @@
 #include "pins.h"
 #include <Arduino.h>
 #include <WiFi.h>
+#include <esp_log.h>
 
 // Improv-Serial protocol implementation. Spec:
 //   https://www.improv-wifi.com/serial/
@@ -52,6 +53,8 @@ bool s_provisioned = false;
 
 uint8_t s_rxBuf[MAGIC_LEN + 4 + MAX_PAYLOAD];
 size_t  s_rxLen = 0;
+uint32_t s_lastRxMs = 0;  // last time bytes arrived from host
+bool s_hostActive = false;
 
 void sendFrame(uint8_t type, const uint8_t* payload, uint8_t len) {
   uint8_t buf[MAGIC_LEN + 4 + 256];
@@ -264,9 +267,31 @@ void begin(const char* deviceName, const char* firmwareVersion) {
 
 void tick() {
   if (s_provisioned) return;
+
+  // Drain any USB-CDC bytes the host has sent. The very first byte is
+  // a strong signal that someone is talking Improv on this channel —
+  // silence the logger immediately so log lines do not interleave with
+  // the binary frame we are about to receive (and the response we are
+  // about to send).
+  bool gotBytes = false;
   while (Serial.available() > 0 && s_rxLen < sizeof(s_rxBuf)) {
     s_rxBuf[s_rxLen++] = (uint8_t)Serial.read();
+    gotBytes = true;
   }
+  if (gotBytes) {
+    s_lastRxMs = millis();
+    if (!s_hostActive) {
+      s_hostActive = true;
+      logging::setSilent(true);
+    }
+  } else if (s_hostActive && (millis() - s_lastRxMs) > 60'000UL) {
+    // Host gave up or finished but never provisioned — let logs flow
+    // again so a developer running `pio device monitor` can see what
+    // is going on.
+    s_hostActive = false;
+    logging::setSilent(false);
+  }
+
   if (s_rxLen >= MAGIC_LEN + 4) parseFrame();
 }
 
