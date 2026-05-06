@@ -96,15 +96,44 @@ void sendRpcResult(uint8_t command, const char* const* strs, size_t n) {
   sendFrame(TYPE_RPC_RESULT, body, (uint8_t)i);
 }
 
+// Status reason captured from the failed connect attempt so the
+// installer page can show something more useful than a generic
+// "couldn't connect". Stored in the magic byte of ERR_UNABLE_TO_CONNECT
+// (we just write to Serial0 / UART0 so a UART adapter sees it; the
+// USB-CDC channel stays clean for Improv).
+uint8_t s_lastConnectStatus = 0;
+
 bool tryConnect(const char* ssid, const char* pass, uint32_t timeoutMs) {
-  LOG_INFO(TAG, "attempting connect ssid=%s", ssid);
+  // Tear the captive-portal AP down and force STA-only mode. The C3's
+  // single radio can struggle to associate cleanly while it is also
+  // bridging an active SoftAP. Wait briefly for the mode change to
+  // settle.
+  WiFi.softAPdisconnect(true);
+  WiFi.disconnect(true /*wifi off*/, true /*erase ap*/);
+  delay(200);
   WiFi.mode(WIFI_STA);
+  delay(200);
+
+  WiFi.setAutoReconnect(true);
   WiFi.begin(ssid, pass);
+
   const uint32_t deadline = millis() + timeoutMs;
+  uint8_t lastStatus = 0xFF;
   while (millis() < deadline) {
-    if (WiFi.status() == WL_CONNECTED) return true;
+    const wl_status_t st = WiFi.status();
+    if (st == WL_CONNECTED) {
+      s_lastConnectStatus = (uint8_t)st;
+      return true;
+    }
+    if ((uint8_t)st != lastStatus) {
+      lastStatus = (uint8_t)st;
+      // Echo to UART0 (silent on USB-CDC) so a UART adapter — if any —
+      // can show real-time status without poisoning Improv.
+      Serial0.printf("[improv] wifi status=%u\n", (unsigned)st);
+    }
     delay(100);
   }
+  s_lastConnectStatus = lastStatus;
   return false;
 }
 
@@ -162,7 +191,7 @@ void handleRpc(const uint8_t* p, uint8_t len) {
       sendCurrentState(STATE_PROVISIONING);
       // Persist creds to NVS so subsequent boots autoconnect.
       WiFi.persistent(true);
-      if (tryConnect(ssid, pass, 30000)) {
+      if (tryConnect(ssid, pass, 45000)) {
         s_provisioned = true;
         sendCurrentState(STATE_PROVISIONED);
 
