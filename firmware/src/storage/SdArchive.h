@@ -1,6 +1,7 @@
 #pragma once
 #include "Sample.h"
 #include <Arduino.h>
+#include <FS.h>
 #include <stdint.h>
 
 // SPI microSD mirror. Hot-pluggable: we attempt remount on demand so

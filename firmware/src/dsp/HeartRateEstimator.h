@@ -1,6 +1,18 @@
 #pragma once
 #include <stdint.h>
 
+// Arduino's binary.h defines B0/B1/... as numeric macros. Undef them
+// before our IIR coefficient member names trip the preprocessor.
+#ifdef B0
+#undef B0
+#endif
+#ifdef B1
+#undef B1
+#endif
+#ifdef B2
+#undef B2
+#endif
+
 // Bandpass + peak-detect HR estimator for the MAX30102 IR channel.
 // Designed to be cheap (~us per sample) so it can run inside the 100Hz
 // sensor task. Beat intervals are emitted out-of-band so HrvWindow can

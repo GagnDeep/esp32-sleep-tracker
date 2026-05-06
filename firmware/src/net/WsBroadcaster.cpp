@@ -27,15 +27,17 @@ void onEvent(AsyncWebSocket* /*ws*/, AsyncWebSocketClient* client,
 // TX queue would otherwise leak heap as new frames pile up.
 void sendOrDrop(const char* body, size_t n) {
   if (!s_ws) return;
-  for (auto* client : s_ws->getClients()) {
-    if (!client) continue;
-    if (client->status() != WS_CONNECTED) continue;
-    if (!client->canSend() ||
-        client->queueLength() >= cfg::WS_QUEUE_DROP_AT) {
+  // ESPAsyncWebServer's getClients() returns a list of clients by
+  // value (std::list<AsyncWebSocketClient>), not pointers — iterate
+  // by reference.
+  for (auto& client : s_ws->getClients()) {
+    if (client.status() != WS_CONNECTED) continue;
+    if (!client.canSend() ||
+        client.queueLen() >= cfg::WS_QUEUE_DROP_AT) {
       s_drops.fetch_add(1, std::memory_order_relaxed);
       continue;
     }
-    client->text(body, n);
+    client.text(body, n);
   }
 }
 }  // namespace

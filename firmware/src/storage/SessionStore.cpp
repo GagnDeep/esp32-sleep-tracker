@@ -183,12 +183,20 @@ void SessionStore::finalizeOrphans() {
       doc["started_at_unix"] = (uint64_t)epochS;
       doc["started_at"]      = timeservice::isoOf(epochS);
     }
-    // tz_offset_min: best-effort snapshot at recovery time.
+    // tz_offset_min: best-effort snapshot at recovery time. ESP32
+    // newlib lacks tm_gmtoff, so derive via mktime(gmtime()) — see
+    // SessionManager::buildSidecar for the same pattern.
     {
       time_t now = time(nullptr);
-      struct tm lt;
-      localtime_r(&now, &lt);
-      doc["tz_offset_min"] = (int32_t)(lt.tm_gmtoff / 60);
+      if (now > 0) {
+        struct tm gmt;
+        gmtime_r(&now, &gmt);
+        gmt.tm_isdst = -1;
+        const time_t fakeLocal = mktime(&gmt);
+        doc["tz_offset_min"] = (int32_t)(-(int64_t)(fakeLocal - now) / 60);
+      } else {
+        doc["tz_offset_min"] = 0;
+      }
     }
     doc["ended_at"]         = id;
     doc["duration_s"]       = 0;

@@ -1,6 +1,7 @@
 #pragma once
 #include "Sample.h"
 #include <Arduino.h>
+#include <FS.h>
 #include <vector>
 #include <stdint.h>
 

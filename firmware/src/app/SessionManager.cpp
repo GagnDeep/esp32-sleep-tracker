@@ -165,12 +165,22 @@ String SessionManager::buildSidecar(uint32_t endedEpoch, uint32_t durationS) con
   d["started_at_unix"] = (uint64_t)sessionStartedEpoch_;
   d["ended_at"]        = endedEpoch ? timeservice::isoOf(endedEpoch) : String();
   d["ended_at_unix"]   = (uint64_t)endedEpoch;
-  // tz_offset_min: snapshot at finalize time (derived via localtime).
+  // tz_offset_min: snapshot at finalize time. ESP32 newlib does not
+  // expose tm_gmtoff, so compute via the mktime(gmtime()) trick:
+  // mktime interprets its tm as local, so feeding it the UTC breakdown
+  // yields the local-time-as-utc-seconds value, whose delta from `now`
+  // is the negative of the UTC offset.
   {
     time_t now = endedEpoch ? (time_t)endedEpoch : time(nullptr);
-    struct tm lt;
-    localtime_r(&now, &lt);
-    d["tz_offset_min"] = (int32_t)(lt.tm_gmtoff / 60);
+    if (now > 0) {
+      struct tm gmt;
+      gmtime_r(&now, &gmt);
+      gmt.tm_isdst = -1;
+      const time_t fakeLocal = mktime(&gmt);
+      d["tz_offset_min"] = (int32_t)(-(int64_t)(fakeLocal - now) / 60);
+    } else {
+      d["tz_offset_min"] = 0;
+    }
   }
   d["duration_s"]      = durationS;
   d["hr_min"]          = hrMin_ == 0xFFFF ? 0 : hrMin_;
