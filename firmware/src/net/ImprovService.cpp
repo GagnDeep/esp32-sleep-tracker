@@ -114,6 +114,15 @@ bool tryConnect(const char* ssid, const char* pass, uint32_t timeoutMs) {
   WiFi.mode(WIFI_STA);
   delay(200);
 
+  // Defensive settings against AUTH_EXPIRE on home routers:
+  //  - turn off STA-side modem sleep (some APs drop slow-handshake clients)
+  //  - allow association with WEP/OPEN security floors so we don't
+  //    silently reject mid-tier consumer routers that announce odd flags
+  //  - max TX power for weak 2.4 GHz neighbourhoods
+  WiFi.setSleep(false);
+  WiFi.setMinSecurity(WIFI_AUTH_WEP);
+  WiFi.setTxPower(WIFI_POWER_19_5dBm);
+
   WiFi.setAutoReconnect(true);
   WiFi.begin(ssid, pass);
 
@@ -187,6 +196,13 @@ void handleRpc(const uint8_t* p, uint8_t len) {
       char pass[65] = {0};
       const uint8_t cpp = passLen < 64 ? passLen : 64;
       memcpy(pass, body + off, cpp);
+
+      // Diagnostic: dump parsed lengths + the raw SSID to UART0 so a
+      // serial adapter (or a UART pin scope) can verify what arrived
+      // off the wire without polluting the USB-CDC Improv channel.
+      // Password length only — never the password itself.
+      Serial0.printf("[improv] WIFI_SETTINGS ssid='%s' (%u bytes) pass=%u bytes\n",
+                     ssid, (unsigned)ssidLen, (unsigned)passLen);
 
       sendCurrentState(STATE_PROVISIONING);
       // Persist creds to NVS so subsequent boots autoconnect.
