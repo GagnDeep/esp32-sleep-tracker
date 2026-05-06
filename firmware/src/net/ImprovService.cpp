@@ -148,6 +148,7 @@ bool tryConnect(const char* ssid, const char* pass, uint32_t timeoutMs) {
       wcfg.sta.bssid_set = true;
     }
   }
+  esp_wifi_set_storage(WIFI_STORAGE_FLASH);  // persist creds to NVS
   esp_wifi_set_mode(WIFI_MODE_STA);
   esp_wifi_set_config(WIFI_IF_STA, &wcfg);
   Serial0.printf("[improv] connect ssid=%s ch=%d pmf=off\n", ssid, channel);
@@ -233,8 +234,17 @@ void handleRpc(const uint8_t* p, uint8_t len) {
                      ssid, (unsigned)ssidLen, (unsigned)passLen);
 
       sendCurrentState(STATE_PROVISIONING);
-      // Persist creds to NVS so subsequent boots autoconnect.
+      // Persist creds to NVS so subsequent boots autoconnect. We also
+      // call esp_wifi_set_storage(FLASH) inside tryConnect so the
+      // low-level esp_wifi_set_config writes through to NVS.
       WiFi.persistent(true);
+      // If we are already provisioned, drop the existing STA link
+      // first so the new auth attempt starts cleanly.
+      if (s_provisioned) {
+        WiFi.disconnect(false /*keep wifi on*/, true /*erase ap*/);
+        delay(200);
+        s_provisioned = false;
+      }
       if (tryConnect(ssid, pass, 45000)) {
         s_provisioned = true;
         sendCurrentState(STATE_PROVISIONED);
@@ -345,7 +355,11 @@ void begin(const char* deviceName, const char* firmwareVersion) {
 }
 
 void tick() {
-  if (s_provisioned) return;
+  // Note: previously we early-returned once provisioned. That broke the
+  // re-provisioning flow — a user opening the installer page later to
+  // switch networks would get "Timeout" because the firmware never
+  // responded again. Always drive the protocol; the WIFI_SETTINGS
+  // handler tears down the current STA before reconnecting.
 
   // Drain any USB-CDC bytes the host has sent. The very first byte is
   // a strong signal that someone is talking Improv on this channel —
