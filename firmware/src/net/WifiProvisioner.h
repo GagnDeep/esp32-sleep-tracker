@@ -21,6 +21,12 @@ String mac();
 // Settings → "switch network" UI flow.
 void resetAndReboot();
 
+// Aborts an in-progress autoConnect/captive-portal loop (called when
+// Improv-Serial has finished provisioning out-of-band so the portal
+// task exits cleanly and the main boot can proceed with the new STA
+// link).
+void stopPortal();
+
 // Scan results (cached). `enc` is one of: "open","wep","wpa","wpa2",
 // "wpa_wpa2","wpa3","unknown".
 struct ScanEntry {

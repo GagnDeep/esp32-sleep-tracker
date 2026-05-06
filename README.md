@@ -4,6 +4,12 @@ A self-contained overnight heart rate, SpO2, and movement tracker built on an ES
 
 > **Not a medical device.** Heuristic sleep staging is for personal exploration only. Do not use this to diagnose or treat any condition.
 
+## ⚡ One-click installer
+
+**[https://gagndeep.github.io/esp32-sleep-tracker/installer/](https://gagndeep.github.io/esp32-sleep-tracker/installer/)**
+
+Plug your ESP32-C3 into a desktop running Chrome / Edge / Opera, click the button, and you're flashed and on WiFi in under a minute. Uses [ESP Web Tools](https://esphome.github.io/esp-web-tools/) + [Improv-Serial](https://www.improv-wifi.com/serial/) — no IDE, no terminal.
+
 ## Hardware
 
 | Component | Role |

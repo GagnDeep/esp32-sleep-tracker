@@ -74,6 +74,11 @@ void resetAndReboot() {
   ESP.restart();
 }
 
+void stopPortal() {
+  LOG_INFO(TAG, "stopping captive portal (provisioned out-of-band)");
+  wm.stopConfigPortal();
+}
+
 std::vector<ScanEntry> scan(uint32_t maxAgeMs) {
   if (!s_scanMutex) s_scanMutex = xSemaphoreCreateMutex();
   if (s_scanMutex) xSemaphoreTake(s_scanMutex, portMAX_DELAY);

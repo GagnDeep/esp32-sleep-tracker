@@ -1,6 +1,8 @@
 #include "ImprovService.h"
+#include "WifiProvisioner.h"
 #include "../util/Log.h"
 #include "config.h"
+#include "pins.h"
 #include <Arduino.h>
 #include <WiFi.h>
 
@@ -126,10 +128,10 @@ void handleRpc(const uint8_t* p, uint8_t len) {
     }
     case RPC_IDENTIFY: {
       // Blink onboard LED twice (~600 ms total).
-      pinMode(8, OUTPUT);
+      pinMode(pins::STATUS_LED, OUTPUT);
       for (int i = 0; i < 2; ++i) {
-        digitalWrite(8, HIGH); delay(120);
-        digitalWrite(8, LOW);  delay(180);
+        digitalWrite(pins::STATUS_LED, HIGH); delay(120);
+        digitalWrite(pins::STATUS_LED, LOW);  delay(180);
       }
       sendRpcResult(cmd, nullptr, 0);
       break;
@@ -154,22 +156,37 @@ void handleRpc(const uint8_t* p, uint8_t len) {
       memcpy(pass, body + off, cpp);
 
       sendCurrentState(STATE_PROVISIONING);
+      // Persist creds to NVS so subsequent boots autoconnect.
+      WiFi.persistent(true);
       if (tryConnect(ssid, pass, 30000)) {
         s_provisioned = true;
         sendCurrentState(STATE_PROVISIONED);
-        // RPC result body: list of redirect URLs the installer page
-        // can navigate to.
-        String url = String("http://") + WiFi.localIP().toString() + "/";
-        const char* urls[] = { url.c_str() };
-        sendRpcResult(cmd, urls, 1);
-        LOG_INFO(TAG, "provisioned at %s — rebooting into normal boot",
-                 url.c_str());
-        // Creds are now saved in NVS by the WiFi driver. Reboot so the
-        // normal boot path picks them up cleanly (avoids fighting the
-        // WiFiManager portal loop that may also be running).
-        delay(500);
-        ESP.restart();
+
+        const String ip   = WiFi.localIP().toString();
+        const String urlIp = String("http://") + ip + "/";
+        const String urlMd = String("http://") + cfg::MDNS_HOSTNAME + ".local/";
+
+        // Spec allows multiple URLs in the result. Send the IP first
+        // (always reachable from the same LAN) and the mDNS variant
+        // second (survives DHCP renewals).
+        const char* urls[] = { urlIp.c_str(), urlMd.c_str() };
+        sendRpcResult(cmd, urls, 2);
+
+        // Log prominently so anyone reading serial sees where to go.
+        LOG_INFO(TAG, "============================================");
+        LOG_INFO(TAG, "  PROVISIONED — open in any browser:");
+        LOG_INFO(TAG, "    %s", urlIp.c_str());
+        LOG_INFO(TAG, "    %s", urlMd.c_str());
+        LOG_INFO(TAG, "============================================");
+
+        // Tear the SoftAP down and signal WiFiManager's portal loop
+        // to exit, so wifi::begin() returns true on the new STA link
+        // and the rest of the boot proceeds normally — no reboot.
+        delay(300);
+        WiFi.softAPdisconnect(true);
+        wifi::stopPortal();
       } else {
+        LOG_WARN(TAG, "connect failed for ssid=%s", ssid);
         sendErrorState(ERR_UNABLE_TO_CONNECT);
         sendCurrentState(STATE_READY);
       }

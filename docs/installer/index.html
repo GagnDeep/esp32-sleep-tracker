@@ -4,14 +4,17 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Sleep Tracker · One-click installer</title>
-  <meta name="description" content="Flash and provision your ESP32-C3 sleep tracker from the browser." />
+  <meta name="description" content="Flash and provision your ESP32-C3 sleep tracker from the browser — no terminal, no IDE." />
+  <meta name="theme-color" content="#0b0d10" />
   <style>
     :root {
       --bg: #0b0d10;
       --bg-2: #14171c;
+      --bg-3: #1b1f25;
       --ink: #e6e9ee;
       --ink-muted: #8b95a3;
       --accent: #7aa2f7;
+      --accent-ink: #0b0d10;
       --border: #1f242c;
       --good: #9ece6a;
       --warn: #e0af68;
@@ -21,9 +24,11 @@
       :root {
         --bg: #f8fafc;
         --bg-2: #ffffff;
+        --bg-3: #f1f5f9;
         --ink: #0f172a;
         --ink-muted: #475569;
         --border: #e2e8f0;
+        --accent-ink: #ffffff;
       }
     }
     * { box-sizing: border-box; }
@@ -32,23 +37,31 @@
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
       background: var(--bg); color: var(--ink);
       line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
     }
     main {
-      max-width: 720px;
+      max-width: 760px;
       margin: 0 auto;
       padding: 56px 24px 96px;
     }
     h1 {
-      font-size: 2rem;
+      font-size: 2.25rem;
       font-weight: 700;
-      letter-spacing: -0.02em;
+      letter-spacing: -0.025em;
       margin: 0 0 8px;
+      line-height: 1.15;
+    }
+    h2 {
+      font-size: 1.15rem;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      margin: 32px 0 12px;
     }
     .tag {
       display: inline-block;
-      font-size: 0.75rem;
+      font-size: 0.72rem;
       font-weight: 600;
-      letter-spacing: 0.05em;
+      letter-spacing: 0.06em;
       text-transform: uppercase;
       padding: 4px 10px;
       border: 1px solid var(--border);
@@ -56,7 +69,8 @@
       color: var(--ink-muted);
       margin-bottom: 16px;
     }
-    p { color: var(--ink-muted); }
+    p { color: var(--ink-muted); margin: 0 0 12px; }
+    .lede { font-size: 1.05rem; max-width: 60ch; }
     .card {
       background: var(--bg-2);
       border: 1px solid var(--border);
@@ -64,39 +78,92 @@
       padding: 24px;
       margin: 24px 0;
     }
-    .install-row {
+    .card h3 { margin: 0 0 8px; font-size: 1.05rem; }
+    .row {
       display: flex;
-      gap: 16px;
+      gap: 16px 24px;
       align-items: center;
       flex-wrap: wrap;
     }
-    esp-web-install-button[install-supported] .unsupported {
-      display: none;
+    button.primary, esp-web-install-button button[slot="activate"] {
+      background: var(--accent);
+      color: var(--accent-ink);
+      border: 0;
+      padding: 12px 22px;
+      font-weight: 600;
+      font-size: 0.95rem;
+      border-radius: 10px;
+      cursor: pointer;
+      font-family: inherit;
     }
+    button.primary:hover { filter: brightness(1.08); }
+    .ghost {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--ink);
+      padding: 12px 18px;
+      font-weight: 500;
+      font-size: 0.9rem;
+      border-radius: 10px;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .ghost:hover { background: var(--bg-3); }
     .unsupported {
       color: var(--bad);
       font-size: 0.875rem;
       max-width: 380px;
     }
-    ol { padding-left: 22px; }
-    ol li { margin-bottom: 8px; }
     code {
-      background: var(--bg);
+      background: var(--bg-3);
       padding: 2px 6px;
       border-radius: 4px;
       font-size: 0.875em;
       border: 1px solid var(--border);
     }
-    a { color: var(--accent); }
-    footer {
-      margin-top: 64px;
-      font-size: 0.875rem;
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .steps {
+      counter-reset: step;
+      list-style: none;
+      padding: 0;
+      margin: 16px 0 0;
+    }
+    .steps li {
+      counter-increment: step;
+      padding: 14px 16px 14px 56px;
+      position: relative;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      margin-bottom: 8px;
+      background: var(--bg-2);
+      font-size: 0.95rem;
+      color: var(--ink);
+    }
+    .steps li::before {
+      content: counter(step);
+      position: absolute;
+      left: 16px;
+      top: 14px;
+      width: 28px; height: 28px;
+      border-radius: 50%;
+      background: var(--accent);
+      color: var(--accent-ink);
+      display: grid; place-items: center;
+      font-weight: 700;
+      font-size: 0.85rem;
+    }
+    .steps li small {
+      display: block;
       color: var(--ink-muted);
+      font-size: 0.85rem;
+      margin-top: 4px;
     }
     .grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: 16px;
+      grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+      gap: 12px;
       margin-top: 16px;
     }
     .feat {
@@ -106,74 +173,169 @@
       border-radius: 12px;
       font-size: 0.9rem;
     }
-    .feat strong { display: block; color: var(--ink); margin-bottom: 4px; }
+    .feat strong {
+      display: block; color: var(--ink); margin-bottom: 4px;
+      font-size: 0.92rem;
+    }
+    .feat span { color: var(--ink-muted); }
+    .badges { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+    .badge {
+      display: inline-block;
+      font-size: 0.7rem;
+      padding: 2px 8px;
+      background: var(--bg-3);
+      border: 1px solid var(--border);
+      color: var(--ink-muted);
+      border-radius: 6px;
+    }
+    .browser-warn {
+      display: none;
+      background: color-mix(in oklab, var(--bad) 12%, var(--bg-2));
+      border-color: var(--bad);
+      color: var(--ink);
+      padding: 14px 18px;
+      border-radius: 12px;
+      border: 1px solid;
+      margin: 16px 0;
+      font-size: 0.92rem;
+    }
+    body[data-unsupported="true"] .browser-warn { display: block; }
+    body[data-unsupported="true"] esp-web-install-button { display: none; }
+
+    footer {
+      margin-top: 64px;
+      font-size: 0.85rem;
+      color: var(--ink-muted);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      * { transition: none !important; animation: none !important; }
+    }
   </style>
 </head>
 <body>
   <main>
     <span class="tag">v0.2.0-dev · ESP32-C3</span>
     <h1>Sleep Tracker installer</h1>
-    <p>
+    <p class="lede">
       Flash the firmware, hand over your WiFi, and land on the device's
-      web app — without touching a terminal. Plug in your ESP32-C3
-      board over USB and click below.
+      web app — without touching a terminal. Plug in your ESP32-C3 board
+      over USB and click below.
     </p>
 
+    <div class="browser-warn">
+      <strong>This browser can't flash over USB.</strong> Use desktop
+      <a href="https://www.google.com/chrome/">Chrome</a>,
+      <a href="https://www.microsoft.com/edge">Edge</a>, or
+      <a href="https://www.opera.com/">Opera</a>. (Firefox and Safari
+      don't expose Web Serial, and iOS browsers can't either.)
+    </div>
+
+    <!-- Primary CTA: full install + WiFi setup -->
     <div class="card">
-      <div class="install-row">
+      <h3>New device — install firmware and configure WiFi</h3>
+      <p>Pick this if you just got a blank ESP32-C3 board. The page
+        flashes ~1.4 MB of firmware (about 8 seconds) and immediately
+        opens the WiFi setup dialog.</p>
+      <div class="row" style="margin-top: 16px;">
         <esp-web-install-button manifest="./manifest.json">
-          <button slot="activate" style="
-            background: var(--accent);
-            color: #0b0d10;
-            border: 0;
-            padding: 12px 20px;
-            font-weight: 600;
-            font-size: 0.95rem;
-            border-radius: 10px;
-            cursor: pointer;
-          ">⚡  Connect & install</button>
+          <button slot="activate">⚡  Connect &amp; install</button>
           <span slot="unsupported" class="unsupported">
-            Your browser does not support flashing over USB.
-            Use desktop Chrome, Edge or Opera.
+            Your browser doesn't support flashing over USB.
           </span>
           <span slot="not-allowed" class="unsupported">
-            This page must be served over HTTPS for browser flashing
-            to work. Open the GitHub Pages copy.
+            This page must be served over HTTPS for browser flashing.
           </span>
         </esp-web-install-button>
-        <span style="color: var(--ink-muted); font-size: 0.875rem;">
-          Chrome / Edge / Opera on desktop · Chrome on Android.
+        <span style="color: var(--ink-muted); font-size: 0.9rem;">
+          ~30 seconds, start to SPA.
         </span>
       </div>
     </div>
 
-    <h2 style="font-size: 1.1rem; margin-top: 32px;">What this does</h2>
-    <ol>
-      <li>Detects your ESP32-C3 over its native USB serial port.</li>
-      <li>Flashes the merged firmware image (~4 MB) to the board.</li>
-      <li>Picks your home WiFi from a scan and sends it to the device
-          over the same USB cable using the
-          <a href="https://www.improv-wifi.com/serial/">Improv-Serial</a>
-          protocol.</li>
-      <li>Redirects you to the device's local web UI once it joins
-          your network — typically <code>http://sleep-tracker.local/</code>.</li>
+    <!-- Secondary CTA: just configure WiFi (already flashed) -->
+    <div class="card">
+      <h3>Already installed — just (re)configure WiFi</h3>
+      <p>If the firmware is already on the device and you want to
+        change networks (or you're moving the device to a new house),
+        skip the flash step.</p>
+      <div class="row" style="margin-top: 16px;">
+        <improv-wifi-launch-button>
+          <button slot="activate" class="ghost">Configure WiFi only</button>
+          <span slot="unsupported" class="unsupported">
+            Your browser doesn't support Web Serial.
+          </span>
+        </improv-wifi-launch-button>
+      </div>
+    </div>
+
+    <h2>What you'll see, step by step</h2>
+    <ol class="steps">
+      <li>
+        <strong>Pick the serial port.</strong>
+        <small>A small browser dialog asks you to pick a port. Choose <code>USB JTAG/serial debug unit</code> or the <code>cu.usbmodem*</code> entry. Click <strong>Connect</strong>.</small>
+      </li>
+      <li>
+        <strong>Firmware flashes.</strong>
+        <small>You'll see a progress bar going from 0 to 100%. About 8 seconds on a USB 2.0 port. <em>Skipped if you used "Configure WiFi only".</em></small>
+      </li>
+      <li>
+        <strong>WiFi network picker appears.</strong>
+        <small>The page asks the firmware to scan and shows the result as a list with signal bars and lock icons. Pick your network. <strong>2.4 GHz only</strong> — the C3 can't see 5 GHz.</small>
+      </li>
+      <li>
+        <strong>Enter your WiFi password.</strong>
+        <small>Click <strong>Save</strong>. The device tries to connect; you'll see "Provisioning…" then either ✅ <em>Provisioned</em> or ❌ <em>Couldn't connect</em>.</small>
+      </li>
+      <li>
+        <strong>Click "Visit Device".</strong>
+        <small>The page hands you a link like <code>http://192.168.1.42/</code>. Open it and you're on the SPA. (A backup mDNS link <code>http://sleep-tracker.local/</code> is also returned in case DHCP later assigns a different IP.)</small>
+      </li>
     </ol>
 
-    <h2 style="font-size: 1.1rem;">Wiring</h2>
-    <p>One sensor, four wires:</p>
+    <h2>Wiring (one sensor, four wires)</h2>
     <div class="grid">
-      <div class="feat"><strong>MAX30102 VIN</strong>3V3 pin</div>
-      <div class="feat"><strong>MAX30102 GND</strong>GND</div>
-      <div class="feat"><strong>MAX30102 SDA</strong>GPIO 4</div>
-      <div class="feat"><strong>MAX30102 SCL</strong>GPIO 5</div>
+      <div class="feat"><strong>MAX30102 VIN</strong><span>3V3 pin</span></div>
+      <div class="feat"><strong>MAX30102 GND</strong><span>GND</span></div>
+      <div class="feat"><strong>MAX30102 SDA</strong><span>GPIO 4</span></div>
+      <div class="feat"><strong>MAX30102 SCL</strong><span>GPIO 5</span></div>
+    </div>
+    <p style="font-size: 0.85rem; margin-top: 8px;">
+      Optional: an MPU6050 IMU on the same I2C bus (SDA=GPIO4, SCL=GPIO5).
+      No SD card required — sessions are stored in LittleFS.
+    </p>
+
+    <h2>What's in the firmware</h2>
+    <div class="grid">
+      <div class="feat"><strong>Live SpO₂ + HR</strong><span>1 Hz aggregated samples streamed over WebSocket.</span></div>
+      <div class="feat"><strong>Sleep stager</strong><span>Awake / Light / Deep heuristic from HRV + motion.</span></div>
+      <div class="feat"><strong>Smart alarm</strong><span>Wakes you in light sleep within a window.</span></div>
+      <div class="feat"><strong>OTA + rollback</strong><span>Firmware updates from the SPA, auto-rollback on failure.</span></div>
+      <div class="feat"><strong>Crash recovery</strong><span>Lost-power sessions are recovered on next boot.</span></div>
+      <div class="feat"><strong>PIN auth (optional)</strong><span>Lock mutating endpoints behind a 4-digit PIN.</span></div>
     </div>
 
     <footer>
       <a href="https://github.com/GagnDeep/esp32-sleep-tracker">Source on GitHub</a> ·
-      Built with <a href="https://esphome.github.io/esp-web-tools/">ESP Web Tools</a>.
+      Built with <a href="https://esphome.github.io/esp-web-tools/">ESP Web Tools</a> ·
+      Provisioning over <a href="https://www.improv-wifi.com/serial/">Improv-Serial</a>.
+      <div class="badges">
+        <span class="badge">ESP32-C3</span>
+        <span class="badge">Web Serial</span>
+        <span class="badge">PWA</span>
+        <span class="badge">Improv</span>
+      </div>
     </footer>
   </main>
 
   <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
+  <script type="module" src="https://unpkg.com/improv-wifi-serial-sdk@2/dist/launch-button.js?module"></script>
+  <script>
+    // Show a clear warning on Firefox / Safari / iOS instead of a
+    // silent unsupported state.
+    if (!('serial' in navigator)) {
+      document.body.dataset.unsupported = 'true';
+    }
+  </script>
 </body>
 </html>
