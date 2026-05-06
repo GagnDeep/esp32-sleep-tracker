@@ -260,12 +260,15 @@
         change networks (or you're moving the device to a new house),
         skip the flash step.</p>
       <div class="row" style="margin-top: 16px;">
-        <improv-wifi-launch-button>
+        <improv-wifi-serial-launch-button>
           <button slot="activate" class="ghost">Configure WiFi only</button>
           <span slot="unsupported" class="unsupported">
             Your browser doesn't support Web Serial.
           </span>
-        </improv-wifi-launch-button>
+          <span slot="not-allowed" class="unsupported">
+            Page must be served over HTTPS.
+          </span>
+        </improv-wifi-serial-launch-button>
       </div>
     </div>
 
@@ -328,8 +331,13 @@
     </footer>
   </main>
 
+  <!--
+    ESP Web Tools (full flash + auto-Improv flow) and the standalone
+    Improv-Serial SDK (just-configure-WiFi flow). Both pinned via
+    esm.sh which rewrites the relative imports inside their bundles.
+  -->
   <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
-  <script type="module" src="https://unpkg.com/improv-wifi-serial-sdk@2/dist/launch-button.js?module"></script>
+  <script type="module" src="https://esm.sh/improv-wifi-serial-sdk@2.5.0/dist/serial-launch-button.js"></script>
   <script>
     // Show a clear warning on Firefox / Safari / iOS instead of a
     // silent unsupported state.
