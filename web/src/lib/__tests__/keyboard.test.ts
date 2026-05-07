@@ -30,16 +30,12 @@ function fireKey(
 // Setup / teardown
 // ---------------------------------------------------------------------------
 
-let uninstall: (() => void) | null = null;
-
 beforeEach(() => {
   __resetForTests();
-  uninstall = installKeyboardBus(document);
+  installKeyboardBus(document);
 });
 
 afterEach(() => {
-  uninstall?.();
-  uninstall = null;
   vi.useRealTimers();
 });
 
@@ -166,6 +162,23 @@ describe('mod combos', () => {
     registerShortcut('alt+t', handler);
     fireKey('t', { altKey: true });
     expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it('reversed-modifier order parses correctly — shift+mod+k fires on meta+shift+k', () => {
+    const handler = vi.fn();
+    registerShortcut('shift+mod+k', handler);
+    fireKey('k', { metaKey: true, shiftKey: true });
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it('both mod+shift+k and shift+mod+k fire on meta+shift+k', () => {
+    const h1 = vi.fn();
+    const h2 = vi.fn();
+    registerShortcut('mod+shift+k', h1);
+    registerShortcut('shift+mod+k', h2);
+    fireKey('k', { metaKey: true, shiftKey: true });
+    expect(h1).toHaveBeenCalledTimes(1);
+    expect(h2).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -367,6 +380,51 @@ describe('sequence input filtering', () => {
     fireKey('g', { target: input }); // first key from input — should block
     vi.advanceTimersByTime(200);
     fireKey('h'); // second key from document
+
+    document.body.removeChild(input);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('non-matching second key does not re-process as single shortcut', () => {
+    vi.useFakeTimers();
+    const seqHandler = vi.fn();
+    const escHandler = vi.fn();
+    registerShortcut(['g', 'h'], seqHandler);
+    registerShortcut('Escape', escHandler);
+
+    fireKey('g');
+    vi.advanceTimersByTime(200);
+    fireKey('Escape'); // non-matching second key — cancels sequence, Escape is eaten
+
+    expect(seqHandler).not.toHaveBeenCalled();
+    expect(escHandler).not.toHaveBeenCalled();
+  });
+
+  it('allowInInput:true sequence fires when both keys come from an input', () => {
+    vi.useFakeTimers();
+    const handler = vi.fn();
+    registerShortcut(['g', 'h'], handler, { allowInInput: true });
+
+    const input = document.createElement('input');
+    document.body.appendChild(input);
+    fireKey('g', { target: input });
+    vi.advanceTimersByTime(200);
+    fireKey('h', { target: input });
+
+    document.body.removeChild(input);
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it('does NOT fire sequence when first key is outside but second key is inside input (no allowInInput)', () => {
+    vi.useFakeTimers();
+    const handler = vi.fn();
+    registerShortcut(['g', 'h'], handler);
+
+    const input = document.createElement('input');
+    document.body.appendChild(input);
+    fireKey('g'); // first key outside input
+    vi.advanceTimersByTime(200);
+    fireKey('h', { target: input }); // second key from input — should block
 
     document.body.removeChild(input);
     expect(handler).not.toHaveBeenCalled();

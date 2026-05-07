@@ -32,7 +32,6 @@ interface ParsedKey {
 }
 
 interface Registration {
-  combo: Combo;
   parsed: ParsedKey | readonly [ParsedKey, ParsedKey]; // single or sequence
   handler: (e: KeyboardEvent) => void;
   allowInInput: boolean;
@@ -214,9 +213,7 @@ function handleKeydown(e: Event): void {
     // Start pending window
     const captured = firstKeyOfSequence;
     const timerId = setTimeout(() => {
-      if (pendingSequence !== null && pendingSequence.timerId === timerId) {
-        pendingSequence = null;
-      }
+      pendingSequence = null;
     }, SEQUENCE_TIMEOUT_MS);
     pendingSequence = { first: captured, timerId, fromInput };
     // Don't preventDefault here — the first key alone isn't a shortcut yet.
@@ -251,7 +248,6 @@ export function registerShortcut(
 ): ShortcutHandle {
   const id = nextId++;
   const reg: Registration = {
-    combo,
     parsed: parseCombo(combo),
     handler,
     allowInInput: opts?.allowInInput ?? false,
@@ -268,8 +264,18 @@ export function registerShortcut(
 
 /**
  * Install the global keydown listener on `target` (default: window).
- * Idempotent — calling multiple times on the same target is safe.
  * Returns a function that removes the listener.
+ *
+ * **Idempotent on the same target** — a second call with the same target
+ * returns a no-op uninstaller; the listener is not duplicated.
+ *
+ * **Target switching** — if called with a *different* target, the previous
+ * listener is removed automatically and the new target is used. Any
+ * uninstaller returned by the prior call becomes a no-op once this happens.
+ *
+ * **Lifecycle guidance** — callers should retain the FIRST install's
+ * uninstaller and call it on teardown. Subsequent installs on the same
+ * target are safe to ignore.
  */
 export function installKeyboardBus(target: EventTarget = window): () => void {
   if (installedTarget === target && boundListener !== null) {
