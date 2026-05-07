@@ -3,10 +3,6 @@ import type { Signal, ReadonlySignal } from '@preact/signals';
 import { useRef } from 'preact/hooks';
 import type { VNode } from 'preact';
 
-// ---------------------------------------------------------------------------
-// State model
-// ---------------------------------------------------------------------------
-
 export interface ScrubberState {
   /** Current cursor time in ms relative to startMs, or null when not active. */
   cursor: Signal<number | null>;
@@ -38,10 +34,6 @@ export function cursorFraction(state: ScrubberState): number | null {
   return Math.max(0, Math.min(1, t / d));
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 function defaultFormatLabel(ms: number): string {
   const s = Math.floor(ms / 1000);
   const hh = String(Math.floor(s / 3600)).padStart(2, '0');
@@ -54,10 +46,6 @@ function fractionFromPointer(track: HTMLElement, clientX: number): number {
   const rect = track.getBoundingClientRect();
   return Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
 }
-
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
 
 export interface ScrubberProps {
   state: ScrubberState;
@@ -80,8 +68,6 @@ export function Scrubber(props: ScrubberProps): VNode {
   const pct = frac !== null ? `${(frac * 100).toFixed(3)}%` : '0%';
   const isActive = cursor !== null;
 
-  // ── Pointer handlers ──────────────────────────────────────────────────────
-
   function applyFraction(f: number) {
     state.cursor.value = Math.round(f * dur);
   }
@@ -103,13 +89,8 @@ export function Scrubber(props: ScrubberProps): VNode {
   }
 
   function onPointerLeave() {
-    // Only clear if not captured (i.e. button released outside track).
-    // We rely on pointer capture to keep updates going during drag —
-    // just clear cursor when the pointer fully leaves without a capture.
     state.cursor.value = null;
   }
-
-  // ── Keyboard handlers ─────────────────────────────────────────────────────
 
   function onKeyDown(e: KeyboardEvent) {
     const step = dur * 0.01;
@@ -167,7 +148,8 @@ export function Scrubber(props: ScrubberProps): VNode {
       {/* Handle + time bubble */}
       {isActive && (
         <div
-          class="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 pointer-events-none"
+          class="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 pointer-events-none
+                 motion-safe:transition-[left] motion-safe:duration-75"
           style={{ left: pct }}
         >
           {/* Time bubble */}
@@ -177,8 +159,7 @@ export function Scrubber(props: ScrubberProps): VNode {
             {formatLabel(cursor!)}
           </div>
           {/* Handle dot */}
-          <div class="w-3 h-3 rounded-full bg-accent shadow-soft
-                      motion-safe:transition-[left] motion-safe:duration-75" />
+          <div class="w-3 h-3 rounded-full bg-accent shadow-soft" />
         </div>
       )}
     </div>

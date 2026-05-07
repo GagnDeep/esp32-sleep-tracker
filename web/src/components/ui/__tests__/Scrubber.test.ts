@@ -1,9 +1,11 @@
-// @vitest-environment node
-// Tests for the Scrubber state model and component rendering.
+// @vitest-environment jsdom
+// Tests for the Scrubber state model, SSR rendering, and interactive behavior.
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { h } from 'preact';
 import { render } from 'preact-render-to-string';
+import { render as domRender } from 'preact';
+import { act } from 'preact/test-utils';
 import {
   createScrubberState,
   onCursorChange,
@@ -91,7 +93,7 @@ describe('cursorFraction', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Component rendering tests
+// Component rendering tests (SSR)
 // ---------------------------------------------------------------------------
 
 describe('Scrubber component', () => {
@@ -138,7 +140,6 @@ describe('Scrubber component', () => {
 
   it('does not show handle when cursor is null', () => {
     const state = createScrubberState(60_000);
-    // cursor is null — no time bubble should be rendered
     const out = render(h(Scrubber, { state }));
     expect(out).not.toContain('font-mono');
   });
@@ -147,5 +148,157 @@ describe('Scrubber component', () => {
     const state = createScrubberState(60_000);
     const out = render(h(Scrubber, { state }));
     expect(out).toContain('tabindex="0"');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Behavioral tests (jsdom — pointer + keyboard)
+//
+// jsdom note: jsdom does not expose PointerEvent, so `'pointerdown' in el`
+// is false. Preact therefore registers listeners under the PascalCase event
+// name (e.g. "PointerDown") rather than "pointerdown". We dispatch plain
+// Events using matching PascalCase type strings and patch the required
+// pointer-event properties (clientX, buttons, pointerId) with
+// Object.defineProperty. setPointerCapture / releasePointerCapture are also
+// absent in jsdom and must be stubbed before dispatching.
+// ---------------------------------------------------------------------------
+
+describe('Scrubber pointer behavior', () => {
+  const DUR = 100_000;
+  let root: HTMLDivElement;
+
+  function setup(durationMs = DUR) {
+    const state = createScrubberState(durationMs);
+    root = document.createElement('div');
+    document.body.appendChild(root);
+    act(() => { domRender(h(Scrubber, { state }), root); });
+    const track = root.querySelector('[role="slider"]') as HTMLElement;
+    // Stub pointer-capture methods absent in jsdom.
+    track.setPointerCapture    = () => {};
+    track.releasePointerCapture = () => {};
+    // Return a known 100 px-wide box starting at x=0.
+    track.getBoundingClientRect = () => ({
+      left: 0, right: 100, width: 100,
+      top: 0, bottom: 28, height: 28,
+      x: 0, y: 0,
+      toJSON: () => ({}),
+    });
+    return { state, track };
+  }
+
+  afterEach(() => {
+    if (root) {
+      domRender(null as unknown as ReturnType<typeof h>, root);
+      root.remove();
+    }
+  });
+
+  /**
+   * Dispatch a synthetic pointer event.
+   * jsdom lacks PointerEvent; preact falls back to registering listeners with
+   * PascalCase names ("PointerDown" instead of "pointerdown"). We match that.
+   */
+  function firePointer(
+    el: HTMLElement,
+    name: 'PointerDown' | 'PointerMove' | 'PointerUp' | 'PointerLeave',
+    clientX: number,
+    buttons: number,
+    pointerId = 1,
+  ) {
+    const evt = new Event(name, { bubbles: true, cancelable: true });
+    Object.defineProperty(evt, 'clientX',   { value: clientX,   configurable: true });
+    Object.defineProperty(evt, 'buttons',   { value: buttons,   configurable: true });
+    Object.defineProperty(evt, 'pointerId', { value: pointerId, configurable: true });
+    el.dispatchEvent(evt);
+  }
+
+  it('pointer drag updates cursor to expected fraction × duration', () => {
+    const { state, track } = setup();
+
+    // pointerdown at x=50 → 50% of 100_000 = 50_000 ms
+    act(() => { firePointer(track, 'PointerDown', 50, 1); });
+    expect(state.cursor.value).toBe(50_000);
+
+    // pointermove at x=75 → 75% of 100_000 = 75_000 ms
+    act(() => { firePointer(track, 'PointerMove', 75, 1); });
+    expect(state.cursor.value).toBe(75_000);
+
+    // pointerup — cursor stays at last position
+    act(() => { firePointer(track, 'PointerUp', 75, 0); });
+    expect(state.cursor.value).toBe(75_000);
+  });
+
+  it('pointermove without button pressed does not update cursor', () => {
+    const { state, track } = setup();
+
+    // hover (buttons: 0) — should be ignored
+    act(() => { firePointer(track, 'PointerMove', 50, 0); });
+    expect(state.cursor.value).toBeNull();
+  });
+});
+
+describe('Scrubber keyboard behavior', () => {
+  const DUR = 100_000;
+  let root: HTMLDivElement;
+
+  function setup() {
+    const state = createScrubberState(DUR);
+    root = document.createElement('div');
+    document.body.appendChild(root);
+    act(() => { domRender(h(Scrubber, { state }), root); });
+    const slider = root.querySelector('[role="slider"]') as HTMLElement;
+    return { state, slider };
+  }
+
+  afterEach(() => {
+    if (root) {
+      domRender(null as unknown as ReturnType<typeof h>, root);
+      root.remove();
+    }
+  });
+
+  function key(el: HTMLElement, k: string): KeyboardEvent {
+    const evt = new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true });
+    act(() => { el.dispatchEvent(evt); });
+    return evt;
+  }
+
+  it('ArrowRight steps cursor by 1% of duration', () => {
+    const { state, slider } = setup();
+    key(slider, 'ArrowRight');
+    expect(state.cursor.value).toBe(DUR * 0.01);
+  });
+
+  it('ArrowLeft steps cursor down by 1% of duration', () => {
+    const { state, slider } = setup();
+    // Set cursor to midpoint first.
+    act(() => { state.cursor.value = DUR / 2; });
+    key(slider, 'ArrowLeft');
+    expect(state.cursor.value).toBeCloseTo(DUR * 0.49);
+  });
+
+  it('Home sets cursor to 0', () => {
+    const { state, slider } = setup();
+    act(() => { state.cursor.value = 50_000; });
+    key(slider, 'Home');
+    expect(state.cursor.value).toBe(0);
+  });
+
+  it('End sets cursor to full duration', () => {
+    const { state, slider } = setup();
+    key(slider, 'End');
+    expect(state.cursor.value).toBe(DUR);
+  });
+
+  it('Arrow keys call preventDefault', () => {
+    const { slider } = setup();
+    const evt = key(slider, 'ArrowRight');
+    expect(evt.defaultPrevented).toBe(true);
+  });
+
+  it('unhandled keys do not call preventDefault', () => {
+    const { slider } = setup();
+    const evt = key(slider, 'Tab');
+    expect(evt.defaultPrevented).toBe(false);
   });
 });
