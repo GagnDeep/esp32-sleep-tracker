@@ -1,6 +1,5 @@
 import type { ComponentChildren, VNode } from 'preact';
-import { useEffect, useRef } from 'preact/hooks';
-import { useId } from 'preact/hooks';
+import { useEffect, useId, useRef, useState } from 'preact/hooks';
 
 export interface DrawerProps {
   open: boolean;
@@ -35,6 +34,14 @@ export function Drawer(props: DrawerProps): VNode | null {
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const previousFocusRef = useRef<Element | null>(null);
 
+  // Slide-in: start off-screen, flip to translate-x-0 on next animation frame
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    const id = requestAnimationFrame(() => setMounted(true));
+    return () => { cancelAnimationFrame(id); setMounted(false); };
+  }, [open]);
+
   // Escape key to close
   useEffect(() => {
     if (!open) return;
@@ -49,21 +56,17 @@ export function Drawer(props: DrawerProps): VNode | null {
   useEffect(() => {
     if (!open) return;
     previousFocusRef.current = document.activeElement;
-    // Defer to ensure panel is mounted and button ref is attached
-    const raf = requestAnimationFrame(() => {
-      closeButtonRef.current?.focus();
-    });
+    const raf = requestAnimationFrame(() => closeButtonRef.current?.focus());
     return () => {
       cancelAnimationFrame(raf);
-      if (previousFocusRef.current instanceof HTMLElement) {
-        previousFocusRef.current.focus();
-      }
+      if (previousFocusRef.current instanceof HTMLElement) previousFocusRef.current.focus();
     };
   }, [open]);
 
   if (!open) return null;
 
   const positionClass = side === 'left' ? 'left-0' : 'right-0';
+  const translate = mounted ? 'translate-x-0' : (side === 'left' ? '-translate-x-full' : 'translate-x-full');
 
   return (
     <div class="fixed inset-0 z-50">
@@ -84,7 +87,8 @@ export function Drawer(props: DrawerProps): VNode | null {
           positionClass,
           widthClass,
           'bg-surface-2 shadow-soft flex flex-col',
-          'motion-safe:transition-transform motion-safe:duration-200 translate-x-0',
+          'motion-safe:transition-transform motion-safe:duration-200',
+          translate,
         ].join(' ')}
       >
         {/* Header */}
