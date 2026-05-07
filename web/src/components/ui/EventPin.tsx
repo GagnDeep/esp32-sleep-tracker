@@ -23,7 +23,10 @@ export interface EventPinProps {
   class?: string;
 }
 
-/** Default SVG path data (24×24 viewBox) for each event kind. */
+/**
+ * Default SVG path data (24×24 viewBox) for each event kind.
+ * Exported for tests. Not part of the public API for callers.
+ */
 export const PIN_ICONS: Record<EventPinKind, string> = {
   'alarm-fire':   'M12 2a7 7 0 0 0-7 7c0 2.38 1.19 4.47 3 5.74V17a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-2.26A7 7 0 0 0 12 2zm-1 15h2v1h-2v-1zm-5.5-9.5A1.5 1.5 0 0 1 4 9H2a1.5 1.5 0 0 1 1.5-1.5zM22 9h-2a1.5 1.5 0 0 1-1.5-1.5A1.5 1.5 0 0 1 20 9z',
   'alarm-snooze': 'M12 2a7 7 0 0 0-7 7c0 2.38 1.19 4.47 3 5.74V17a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-2.26A7 7 0 0 0 12 2zm-1 15h2v1h-2v-1zM9 10h4l-4 4h4',
@@ -57,12 +60,16 @@ export function EventPin(props: EventPinProps): VNode {
     cls ?? '',
   ].filter(Boolean).join(' ');
 
+  // aria-hidden="true" is kept so screen readers use aria-label on the parent
+  // element as the single source of truth. The <title> still renders a browser
+  // tooltip on hover even when the SVG is hidden from the accessibility tree.
   const icon = (
     <svg
       width="16" height="16" viewBox="0 0 24 24"
       fill="currentColor" aria-hidden="true"
       class="block shrink-0"
     >
+      <title>{label}</title>
       <path d={d} />
     </svg>
   );
@@ -81,7 +88,6 @@ export function EventPin(props: EventPinProps): VNode {
         tabIndex={0}
         onClick={onClick}
       >
-        <title>{label}</title>
         {icon}
         {hairline}
       </button>
@@ -95,7 +101,6 @@ export function EventPin(props: EventPinProps): VNode {
       aria-label={label}
       role="img"
     >
-      <title>{label}</title>
       {icon}
       {hairline}
     </span>

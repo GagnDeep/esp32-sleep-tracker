@@ -49,6 +49,17 @@ describe('EventPin', () => {
     expect(out).toContain('My annotation');
   });
 
+  it('<title> element is rendered inside the <svg>, not as a sibling', () => {
+    const out = renderPin({ t: 0, durationMs: 1000, kind: 'note', title: 'My annotation' });
+    // The <title> must appear after the opening <svg tag and before </svg>.
+    const svgStart = out.indexOf('<svg');
+    const svgEnd = out.indexOf('</svg>');
+    const titlePos = out.indexOf('<title>My annotation</title>');
+    expect(svgStart).toBeGreaterThan(-1);
+    expect(titlePos).toBeGreaterThan(svgStart);
+    expect(titlePos).toBeLessThan(svgEnd);
+  });
+
   it('alarm-fire maps to text-warn color class', () => {
     const out = renderPin({ t: 0, durationMs: 1000, kind: 'alarm-fire' });
     expect(out).toContain('text-warn');
