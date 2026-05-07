@@ -100,6 +100,26 @@ class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
 }
 
+// ---------------------------------------------------------------------------
+// 401 re-queue (bug #5)
+// When a non-GET request receives a 401 the caller's promise is parked here
+// instead of being dropped. The auth flow must call replayPendingRequest()
+// after a successful PIN unlock so the original promise resolves with the
+// replayed response.
+//
+// TODO(A2-followup): call replayPendingRequest() from auth.ts after a
+// successful PIN unlock (e.g. after pin.value is set and pinRequired is
+// cleared). Import it as:
+//   import { replayPendingRequest } from './api';
+// and invoke it right after `pinRequired.value = false`.
+// ---------------------------------------------------------------------------
+interface PendingReplay {
+  resolve: (r: Response) => void;
+  reject: (e: Error) => void;
+  redo: () => Promise<Response>;
+}
+let pendingReplay: PendingReplay | null = null;
+
 const TIMEOUT_MS = 10_000;
 const RETRY_DELAY_MS = 500;
 
@@ -154,6 +174,28 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     res = await rawFetch(path, init);
   }
   if (res.status === 401) {
+    const method = (init?.method ?? 'GET').toUpperCase();
+    if (method !== 'GET') {
+      // Park the request so replayPendingRequest() can resume it after unlock.
+      // Only one pending replay is tracked at a time — overwrite if a second
+      // 401 arrives (the user is unlocking once anyway).
+      return new Promise<T>((resolve, reject) => {
+        pendingReplay = {
+          resolve: (r: Response) => {
+            // Re-parse the replayed response the same way request<T> would.
+            if (r.status === 204) { resolve(undefined as unknown as T); return; }
+            r.text().then((text) => {
+              if (!text) { resolve(undefined as unknown as T); return; }
+              try { resolve(JSON.parse(text) as T); }
+              catch { reject(new ApiError(r.status, `non-json response ${path}`)); }
+            }).catch((e: unknown) => reject(e instanceof Error ? e : new Error(String(e))));
+          },
+          reject: (e: Error) => reject(e),
+          redo: () => rawFetch(path, init),
+        };
+        pinRequired.value = true;
+      });
+    }
     pinRequired.value = true;
     throw new ApiError(401, `unauthorized ${path}`);
   }
@@ -243,5 +285,55 @@ export const api = {
 
   csvUrl:  (id: string) => `/api/sessions/${encodeURIComponent(id)}.csv`,
 };
+
+// ---------------------------------------------------------------------------
+// Replay a parked 401 request after successful PIN unlock.
+// TODO(A2-followup): wire this in auth.ts — import { replayPendingRequest }
+// from './api' and call it right after clearing pinRequired.
+// ---------------------------------------------------------------------------
+export async function replayPendingRequest(): Promise<void> {
+  if (!pendingReplay) return;
+  const p = pendingReplay;
+  pendingReplay = null;
+  try {
+    const r = await p.redo();
+    p.resolve(r);
+  } catch (e) {
+    p.reject(e instanceof Error ? e : new Error(String(e)));
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Tags — Phase-E firmware endpoints; stubs return safe defaults on failure.
+// ---------------------------------------------------------------------------
+
+export interface TagsResponse { tags: string[]; }
+
+export async function getTags(): Promise<string[]> {
+  const r = await rawFetch('/api/tags', undefined);
+  if (!r.ok) return [];
+  const j = (await r.json()) as TagsResponse;
+  return j.tags ?? [];
+}
+
+export async function putTags(tags: string[]): Promise<void> {
+  await rawFetch('/api/tags', jsonInit('PUT', { tags }));
+}
+
+// ---------------------------------------------------------------------------
+// Goals — Phase-E firmware endpoints; stubs return safe defaults on failure.
+// ---------------------------------------------------------------------------
+
+export interface GoalsResponse { targetSleepMin?: number; targetScore?: number; }
+
+export async function getGoals(): Promise<GoalsResponse> {
+  const r = await rawFetch('/api/goals', undefined);
+  if (!r.ok) return {};
+  return (await r.json()) as GoalsResponse;
+}
+
+export async function putGoals(g: GoalsResponse): Promise<void> {
+  await rawFetch('/api/goals', jsonInit('PUT', g));
+}
 
 export { ApiError };

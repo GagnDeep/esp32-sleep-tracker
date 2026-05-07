@@ -1,9 +1,29 @@
+// @vitest-environment jsdom
+
 // Round-trip the 14-byte sample stride against the pure parser. We
 // build the bytes by hand (little-endian) so any drift between the
 // firmware struct and the JS reader trips this test.
+//
+// Also covers:
+//   - 401 re-queue infrastructure (replayPendingRequest, bug #5)
+//   - Tag endpoint stubs (getTags / putTags)
+//   - Goal endpoint stubs (getGoals / putGoals)
 
-import { describe, it, expect } from 'vitest';
-import { parseSamples, SAMPLE_STRIDE } from '../api';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import {
+  parseSamples,
+  SAMPLE_STRIDE,
+  api,
+  replayPendingRequest,
+  getTags,
+  putTags,
+  getGoals,
+  putGoals,
+} from '../api';
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 function packSample(
   t_ms: number,
@@ -24,6 +44,23 @@ function packSample(
   // bytes 12-13 reserved → leave zero
   return buf;
 }
+
+function makeResponse(status: number, body: string, ok?: boolean): Response {
+  const isOk = ok ?? (status >= 200 && status < 300);
+  return {
+    status,
+    statusText: status === 200 ? 'OK' : String(status),
+    ok: isOk,
+    text: () => Promise.resolve(body),
+    json: () => Promise.resolve(body ? JSON.parse(body) : undefined),
+    arrayBuffer: () => Promise.resolve(new ArrayBuffer(0)),
+    headers: new Headers(),
+  } as unknown as Response;
+}
+
+// ---------------------------------------------------------------------------
+// parseSamples
+// ---------------------------------------------------------------------------
 
 describe('parseSamples', () => {
   it('parses two known samples back to the canned values', () => {
@@ -80,5 +117,154 @@ describe('parseSamples', () => {
     expect(out).toHaveLength(1);
     expect(out[0].t_ms).toBe(7777);
     expect(out[0].hr_bpm).toBe(72);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 401 re-queue (bug #5)
+// ---------------------------------------------------------------------------
+
+describe('401 re-queue', () => {
+  const origFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = origFetch;
+    vi.restoreAllMocks();
+  });
+
+  it('replayPendingRequest is a no-op when nothing is pending', async () => {
+    // Should resolve immediately without throwing.
+    await expect(replayPendingRequest()).resolves.toBeUndefined();
+  });
+
+  it('parks a non-GET 401 and resolves the original promise after replay', async () => {
+    // First call → 401; second call (replay) → 200 with JSON body.
+    let callCount = 0;
+    globalThis.fetch = vi.fn().mockImplementation(() => {
+      callCount += 1;
+      if (callCount === 1) {
+        return Promise.resolve(makeResponse(401, '', false));
+      }
+      return Promise.resolve(makeResponse(200, JSON.stringify({ ok: true })));
+    });
+
+    // Fire a POST — it should park on 401 and not reject.
+    const pending = api.startSession(); // POST /api/sessions/start
+
+    // Wait for the 401 branch to execute and pendingReplay to be set.
+    // The async chain (request → rawFetch → fetch mock) takes several
+    // microtask turns; a macrotask boundary (setTimeout 0) is the most
+    // reliable way to drain them without coupling to implementation depth.
+    await new Promise<void>((r) => setTimeout(r, 0));
+
+    // Simulate the auth flow completing — replay the parked request.
+    await replayPendingRequest();
+
+    // Now the original promise should resolve with the 200 body.
+    const result = await pending;
+    expect(result).toEqual({ ok: true });
+    expect(callCount).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tag endpoints
+// ---------------------------------------------------------------------------
+
+describe('getTags', () => {
+  const origFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = origFetch;
+    vi.restoreAllMocks();
+  });
+
+  it('returns the tags array on 200', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      makeResponse(200, JSON.stringify({ tags: ['deep-sleep', 'nap'] })),
+    );
+    const tags = await getTags();
+    expect(tags).toEqual(['deep-sleep', 'nap']);
+  });
+
+  it('returns [] on a non-ok response (e.g. 404)', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      makeResponse(404, 'Not Found', false),
+    );
+    const tags = await getTags();
+    expect(tags).toEqual([]);
+  });
+});
+
+describe('putTags', () => {
+  const origFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = origFetch;
+    vi.restoreAllMocks();
+  });
+
+  it('sends a PUT request with the tags JSON body', async () => {
+    const mockFetch = vi.fn().mockResolvedValue(makeResponse(204, ''));
+    globalThis.fetch = mockFetch;
+
+    await putTags(['a', 'b']);
+
+    expect(mockFetch).toHaveBeenCalledOnce();
+    const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('/api/tags');
+    expect(init.method).toBe('PUT');
+    expect(JSON.parse(init.body as string)).toEqual({ tags: ['a', 'b'] });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Goal endpoints
+// ---------------------------------------------------------------------------
+
+describe('getGoals', () => {
+  const origFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = origFetch;
+    vi.restoreAllMocks();
+  });
+
+  it('returns parsed goal object on 200', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      makeResponse(200, JSON.stringify({ targetSleepMin: 480, targetScore: 85 })),
+    );
+    const goals = await getGoals();
+    expect(goals).toEqual({ targetSleepMin: 480, targetScore: 85 });
+  });
+
+  it('returns {} on a non-ok response', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      makeResponse(404, 'Not Found', false),
+    );
+    const goals = await getGoals();
+    expect(goals).toEqual({});
+  });
+});
+
+describe('putGoals', () => {
+  const origFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = origFetch;
+    vi.restoreAllMocks();
+  });
+
+  it('sends a PUT request with the goals JSON body', async () => {
+    const mockFetch = vi.fn().mockResolvedValue(makeResponse(204, ''));
+    globalThis.fetch = mockFetch;
+
+    await putGoals({ targetSleepMin: 420, targetScore: 75 });
+
+    expect(mockFetch).toHaveBeenCalledOnce();
+    const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('/api/goals');
+    expect(init.method).toBe('PUT');
+    expect(JSON.parse(init.body as string)).toEqual({ targetSleepMin: 420, targetScore: 75 });
   });
 });
