@@ -64,6 +64,30 @@ function Chevron({ dir }: { dir: TrendDirection }): VNode {
   );
 }
 
+/**
+ * Private sub-component that renders the trend chevron + delta text.
+ * Color is computed internally from `dir` + `semantics` so the parent
+ * does not need to pass a pre-computed color string.
+ * The parent still computes `dir` once for the aria-label addendum; this
+ * component recomputes it independently to keep its own concerns local.
+ */
+function TrendRow({ trend }: { trend: NonNullable<StatCardProps['trend']> }): VNode {
+  const dir = trend.direction ?? inferDirection(trend.delta);
+  const inverted = trend.semantics === 'inverted';
+  const color =
+    dir === 'flat' ? 'text-ink-muted' :
+    dir === 'up'   ? (inverted ? 'text-bad'  : 'text-good') :
+                     (inverted ? 'text-good' : 'text-bad');
+  const sign = trend.delta >= 0 ? '+' : '−';
+  const abs = Math.abs(trend.delta);
+  return (
+    <div class={['flex items-baseline gap-1 text-xs', color].join(' ')}>
+      <Chevron dir={dir} />
+      <span class="tabular-nums">{`${sign}${abs}${trend.deltaUnit ? ' ' + trend.deltaUnit : ''}`}</span>
+    </div>
+  );
+}
+
 export function StatCard(props: StatCardProps): VNode {
   const {
     label,
@@ -79,26 +103,21 @@ export function StatCard(props: StatCardProps): VNode {
     children,
   } = props;
 
+  // Compute direction once for the aria-label addendum.
+  // TrendRow recomputes independently — avoids threading an extra prop
+  // through a private component for a single-consumer value.
+  const dir = trend ? (trend.direction ?? inferDirection(trend.delta)) : null;
+
   // Compose aria-label.
   let computedAriaLabel = `${label}: ${value}${unit ? ' ' + unit : ''}`;
-  if (trend) {
-    const dir = trend.direction ?? inferDirection(trend.delta);
+  if (trend && dir) {
     computedAriaLabel += `, trend ${dir} ${Math.abs(trend.delta)}`;
   }
   const finalAriaLabel = ariaLabel ?? computedAriaLabel;
 
-  // Trend color based on direction + semantics.
-  let trendColor = 'text-ink-muted';
-  if (trend) {
-    const dir = trend.direction ?? inferDirection(trend.delta);
-    const inverted = trend.semantics === 'inverted';
-    if (dir === 'up')   trendColor = inverted ? 'text-bad'  : 'text-good';
-    if (dir === 'down') trendColor = inverted ? 'text-good' : 'text-bad';
-  }
-
   const baseClass = [
     'rounded-2xl bg-surface-2 p-4 shadow-soft flex flex-col gap-1 min-w-0',
-    onClick ? 'cursor-pointer focus-visible:outline focus-visible:outline-2' : '',
+    onClick ? 'cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent' : '',
     cls ?? '',
   ].filter(Boolean).join(' ');
 
@@ -119,18 +138,7 @@ export function StatCard(props: StatCardProps): VNode {
       {hint && <span class="text-xs text-ink-muted truncate">{hint}</span>}
 
       {/* Trend row */}
-      {trend && (() => {
-        const dir = trend.direction ?? inferDirection(trend.delta);
-        const sign = trend.delta >= 0 ? '+' : '−';
-        const abs = Math.abs(trend.delta);
-        const deltaStr = `${sign}${abs}${trend.deltaUnit ? ' ' + trend.deltaUnit : ''}`;
-        return (
-          <div class={['flex items-center gap-1 text-xs', trendColor].join(' ')}>
-            <Chevron dir={dir} />
-            <span>{deltaStr}</span>
-          </div>
-        );
-      })()}
+      {trend && <TrendRow trend={trend} />}
 
       {/* Children slot (chip, breakdown bar, etc.) */}
       {children}
@@ -163,7 +171,7 @@ export function StatCard(props: StatCardProps): VNode {
   }
 
   return (
-    <div role="group" class={baseClass} aria-label={finalAriaLabel}>
+    <div role="region" class={baseClass} aria-label={finalAriaLabel}>
       {inner}
     </div>
   );

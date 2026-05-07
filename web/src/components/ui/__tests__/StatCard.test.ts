@@ -28,9 +28,9 @@ describe('StatCard', () => {
     expect(out).toContain('below avg');
   });
 
-  it('renders as div with role=group when no onClick', () => {
+  it('renders as div with role=region when no onClick', () => {
     const out = card({ label: 'Score', value: '80' });
-    expect(out).toContain('role="group"');
+    expect(out).toContain('role="region"');
     expect(out).not.toContain('<button');
   });
 
@@ -47,7 +47,7 @@ describe('StatCard', () => {
 
   it('respects user-provided ariaLabel', () => {
     const out = card({ label: 'HR', value: '58', ariaLabel: 'Custom label' });
-    expect(out).toContain('Custom label');
+    expect(out).toContain('aria-label="Custom label"');
     expect(out).not.toContain('HR: 58');
   });
 
@@ -90,13 +90,13 @@ describe('StatCard', () => {
   it('renders sparkline footer when spark is provided', () => {
     const out = card({ label: 'Score', value: '82', spark: [70, 75, 80, 82] });
     expect(out).toContain('<svg');
-    expect(out).toContain('opacity-70');
+    expect(out).toContain('Trend:');
   });
 
   it('does not render sparkline when spark is absent', () => {
     const out = card({ label: 'Score', value: '82' });
-    // No sparkline SVG should appear (the chevron also emits svg, so check opacity-70)
-    expect(out).not.toContain('opacity-70');
+    // No sparkline present: the Sparkline <title> text starts with "Trend:"
+    expect(out).not.toContain('Trend:');
   });
 
   it('applies tone color class to value', () => {
