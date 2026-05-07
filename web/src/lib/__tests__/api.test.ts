@@ -165,6 +165,60 @@ describe('401 re-queue', () => {
     expect(result).toEqual({ ok: true });
     expect(callCount).toBe(2);
   });
+
+  it('GET 401 throws ApiError and is NOT parked', async () => {
+    // A GET request that receives 401 should throw immediately and must
+    // not register anything in pendingReplay, so replayPendingRequest()
+    // is a no-op afterwards.
+    globalThis.fetch = vi.fn().mockResolvedValue(makeResponse(401, '', false));
+
+    // api.status() is a GET — it must reject with ApiError(401).
+    await expect(api.status()).rejects.toMatchObject({ status: 401 });
+
+    // Nothing was parked — replay should resolve without side-effects.
+    await expect(replayPendingRequest()).resolves.toBeUndefined();
+  });
+
+  it('second 401 overwrites the first parked request', async () => {
+    // Two successive non-GET 401s: the second overwrites pendingReplay.
+    // The first caller's promise stays unresolved forever (documented
+    // behavior — only one replay slot is tracked at a time).
+    let callCount = 0;
+    globalThis.fetch = vi.fn().mockImplementation(() => {
+      callCount += 1;
+      if (callCount <= 2) {
+        // Both initial calls receive 401 → both park; second wins.
+        return Promise.resolve(makeResponse(401, '', false));
+      }
+      // Replay call → 200.
+      return Promise.resolve(makeResponse(200, JSON.stringify({ ok: true })));
+    });
+
+    // Fire two non-GET requests back-to-back.
+    const first = api.startSession();
+    const second = api.stopSession(); // POST /api/sessions/stop
+
+    // Drain microtasks so both 401 branches have run and pendingReplay
+    // has been overwritten by the second request.
+    await new Promise<void>((r) => setTimeout(r, 0));
+
+    // Replay: should resolve the SECOND parked request via the 200.
+    await replayPendingRequest();
+
+    // Second caller resolves with the 200 body.
+    await expect(second).resolves.toEqual({ ok: true });
+
+    // First caller's promise must still be unresolved — race it against
+    // a 50ms timeout sentinel.
+    const sentinel = 'unresolved';
+    const winner = await Promise.race([
+      first,
+      new Promise<string>((r) => setTimeout(() => r(sentinel), 50)),
+    ]);
+    expect(winner).toBe(sentinel);
+
+    expect(callCount).toBe(3); // two 401s + one replay
+  });
 });
 
 // ---------------------------------------------------------------------------
