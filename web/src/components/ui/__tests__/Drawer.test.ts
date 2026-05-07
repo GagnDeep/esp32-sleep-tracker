@@ -67,6 +67,11 @@ describe('Drawer', () => {
     expect(out).toContain('Save');
   });
 
+  it('omits aria-labelledby when no title is provided', () => {
+    const out = drawer({ open: true });
+    expect(out).not.toContain('aria-labelledby');
+  });
+
   it('positions panel on right by default', () => {
     const out = drawer({ open: true });
     expect(out).toContain('right-0');
@@ -75,8 +80,10 @@ describe('Drawer', () => {
 
   it('positions panel on left when side="left"', () => {
     const out = drawer({ open: true, side: 'left' });
-    expect(out).toContain('left-0');
-    expect(out).not.toContain('right-0');
+    // Scope assertion to the panel element's class attribute
+    const panelMatch = out.match(/role="dialog"[^>]*class="([^"]*)"/);
+    expect(panelMatch?.[1]).toContain('left-0');
+    expect(panelMatch?.[1]).not.toContain('right-0');
   });
 
   it('applies custom widthClass', () => {

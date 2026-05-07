@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // Runtime (DOM) tests for Drawer — Escape, backdrop click, close button, focus restore.
 
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { h } from 'preact';
 import { render } from 'preact';
 import { act } from 'preact/test-utils';
@@ -72,6 +72,13 @@ describe('Drawer DOM — close button click', () => {
 });
 
 describe('Drawer DOM — focus restoration', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['requestAnimationFrame', 'cancelAnimationFrame'] });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('restores focus to previously-focused element when drawer closes', () => {
     // Mount an external button and focus it as "previous" focus
     const externalBtn = document.createElement('button');
@@ -80,14 +87,16 @@ describe('Drawer DOM — focus restoration', () => {
     act(() => { externalBtn.focus(); });
     expect(document.activeElement).toBe(externalBtn);
 
-    // Open the drawer — it will steal focus
+    // Open the drawer — it will steal focus (after rAF fires)
     const onClose = vi.fn();
     setup({ open: true, title: 'Focus Test', onClose });
+    act(() => { vi.runAllTimers(); });
 
     // Close the drawer by re-rendering with open=false
     act(() => {
       render(h(Drawer, { open: false, onClose, title: 'Focus Test' }), container);
     });
+    act(() => { vi.runAllTimers(); });
 
     // Focus should have been restored to the external button
     expect(document.activeElement).toBe(externalBtn);

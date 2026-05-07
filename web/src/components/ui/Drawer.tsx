@@ -1,5 +1,5 @@
 import type { ComponentChildren, VNode } from 'preact';
-import { useEffect, useId, useRef, useState } from 'preact/hooks';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'preact/hooks';
 
 export interface DrawerProps {
   open: boolean;
@@ -30,7 +30,7 @@ export function Drawer(props: DrawerProps): VNode | null {
   } = props;
 
   const internalId = useId();
-  const labelId = ariaLabelledBy ?? `drawer-title-${internalId}`;
+  const labelId = title ? (ariaLabelledBy ?? `drawer-title-${internalId}`) : undefined;
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const previousFocusRef = useRef<Element | null>(null);
 
@@ -52,10 +52,12 @@ export function Drawer(props: DrawerProps): VNode | null {
     return () => document.removeEventListener('keydown', onKey);
   }, [open, onClose]);
 
-  // Focus management: save previous focus, move to close button, restore on close
+  // Capture previous focus synchronously (before paint) to avoid close-then-reopen race
+  useLayoutEffect(() => { if (open) previousFocusRef.current = document.activeElement; }, [open]);
+
+  // Move focus to close button after paint; restore on close
   useEffect(() => {
     if (!open) return;
-    previousFocusRef.current = document.activeElement;
     const raf = requestAnimationFrame(() => closeButtonRef.current?.focus());
     return () => {
       cancelAnimationFrame(raf);
@@ -81,7 +83,7 @@ export function Drawer(props: DrawerProps): VNode | null {
       <div
         role="dialog"
         aria-modal="true"
-        aria-labelledby={labelId}
+        {...(labelId ? { 'aria-labelledby': labelId } : {})}
         class={[
           'absolute top-0 bottom-0',
           positionClass,
@@ -93,10 +95,7 @@ export function Drawer(props: DrawerProps): VNode | null {
       >
         {/* Header */}
         <div class="flex items-center justify-between px-4 py-3 border-b border-surface-3 shrink-0">
-          {title
-            ? <h2 id={labelId} class="text-base font-semibold truncate">{title}</h2>
-            : <span id={labelId} aria-hidden="true" />
-          }
+          {title && <h2 id={labelId} class="text-base font-semibold truncate">{title}</h2>}
           <button
             ref={closeButtonRef}
             type="button"
