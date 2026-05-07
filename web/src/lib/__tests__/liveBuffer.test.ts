@@ -333,7 +333,7 @@ describe('sampleAt', () => {
     buf.push(sample(200));
     buf.push(sample(300));
 
-    expect(buf.sampleAt(50)?.t).toBe(0);   // 50 closer to 0 than 100? same dist → either ok but spec says closest
+    expect(buf.sampleAt(50)?.t).toBe(0);   // tie (equidistant from 0 and 100) → prefer earlier per tie-break rule
     expect(buf.sampleAt(160)?.t).toBe(200); // 160 closer to 200 than 100
     expect(buf.sampleAt(280)?.t).toBe(300); // 280 closer to 300 than 200
     expect(buf.sampleAt(-10)?.t).toBe(0);   // clamp to first
@@ -371,5 +371,36 @@ describe('clear()', () => {
 
     expect(buf.raw()).toHaveLength(1);
     expect(buf.aggregated()).toHaveLength(1);
+  });
+});
+
+// ── Ownership / aliasing ──────────────────────────────────────────────────────
+
+describe('raw() ownership', () => {
+  it('mutating a returned sample does not corrupt internal state', () => {
+    const buf = new LiveBuffer();
+    buf.push(sample(0, { hr: 70 }));
+
+    const samples = buf.raw();
+    // Force-mutate the returned object (cast needed because RawSample is readonly).
+    (samples[0] as { hr: number }).hr = 999;
+
+    // Internal state must be unchanged.
+    const again = buf.raw();
+    expect(again[0].hr).toBe(70);
+  });
+});
+
+// ── Gap handling ──────────────────────────────────────────────────────────────
+
+describe('gap handling', () => {
+  it('gap of multiple buckets produces no synthetic empty buckets', () => {
+    const buf = new LiveBuffer({ windowMs: 10_000, bucketMs: 1_000 });
+    buf.push(sample(0,     { hr: 60 }));
+    buf.push(sample(5_000, { hr: 80 }));
+    const agg = buf.aggregated();
+    expect(agg).toHaveLength(2);
+    expect(agg[0].tStart).toBe(0);
+    expect(agg[1].tStart).toBe(5_000);
   });
 });

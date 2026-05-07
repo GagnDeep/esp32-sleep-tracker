@@ -5,31 +5,34 @@
 // Design notes:
 //   - rawBuf is a pre-allocated circular array; rawHead is the next
 //     write slot; rawTail tracks the oldest live slot explicitly so
-//     eviction is O(1).
+//     eviction is amortized O(1).
 //   - aggBuf stores sealed AggregatedPoints. The open bucket lives in
 //     `acc` and is included by aggregated() without sealing (so callers
 //     always see the freshest data).
 //   - Aggregated eviction is time-based: any sealed bucket whose tEnd
 //     is <= (latestT - windowMs) is dropped by advancing aggTail.
+//   - push() is amortized O(1): a single push after a large clock jump
+//     may seal one bucket and sweep the eviction loop, but total work
+//     over N pushes is O(N).
 
 export interface RawSample {
-  t: number;        // ms since session start, monotonic
-  hr: number;
-  spo2: number;
-  activity: number;
-  stage: number;
-  flags: number;
+  readonly t: number;        // ms since session start, monotonic
+  readonly hr: number;
+  readonly spo2: number;
+  readonly activity: number;
+  readonly stage: number;
+  readonly flags: number;
 }
 
 export interface AggregatedPoint {
-  tStart: number;   // bucket start (ms, inclusive)
-  tEnd: number;     // bucket end (ms, exclusive)
-  hrAvg: number;
-  hrMax: number;
-  spo2Avg: number;
-  spo2Min: number;  // dips matter more than peaks
-  activityMax: number;
-  count: number;
+  readonly tStart: number;   // bucket start (ms, inclusive)
+  readonly tEnd: number;     // bucket end (ms, exclusive)
+  readonly hrAvg: number;
+  readonly hrMax: number;
+  readonly spo2Avg: number;
+  readonly spo2Min: number;  // dips matter more than peaks
+  readonly activityMax: number;
+  readonly count: number;
 }
 
 export interface LiveBufferOptions {
@@ -120,7 +123,7 @@ export class LiveBuffer {
   constructor(opts: LiveBufferOptions = {}) {
     this.windowMs = opts.windowMs ?? 60_000;
     this.bucketMs = opts.bucketMs ?? 1_000;
-    this.maxAgg   = Math.ceil(this.windowMs / this.bucketMs) + 1; // +1 for open acc overflow
+    this.maxAgg   = Math.ceil(this.windowMs / this.bucketMs) + 1; // +1 headroom: seal is written before the eviction sweep runs
     this.maxRaw   = opts.maxRaw ?? Math.ceil(this.windowMs / 20);
 
     this.rawBuf   = new Array<RawSample>(this.maxRaw);
@@ -147,7 +150,7 @@ export class LiveBuffer {
     // buckets between pushes — we do NOT emit synthetic empty buckets
     // for gaps; we just open the right one).
     if (this.acc !== null && s.t >= this.acc.tEnd) {
-      this._sealAndAdvance(s.t);
+      this.sealAndAdvance();
     }
 
     // Open a fresh accumulator if needed.
@@ -171,7 +174,9 @@ export class LiveBuffer {
     if (s.activity > this.acc.activityMax) this.acc.activityMax = s.activity;
 
     // Append raw sample to ring, evicting the oldest if full.
-    this.rawBuf[this.rawHead] = s;
+    // Copy the sample so callers cannot corrupt internal state by mutating
+    // the object they pushed (raw() returns refs into this same array).
+    this.rawBuf[this.rawHead] = { t: s.t, hr: s.hr, spo2: s.spo2, activity: s.activity, stage: s.stage, flags: s.flags };
     this.rawHead = (this.rawHead + 1) % this.maxRaw;
     if (this.rawCount < this.maxRaw) {
       this.rawCount++;
@@ -197,10 +202,10 @@ export class LiveBuffer {
     }
   }
 
-  // Seal the current accumulator into aggBuf and open the next one.
-  // If there's a large time gap we just open the bucket for the
-  // given timestamp directly (no synthetic empty buckets).
-  private _sealAndAdvance(nextT: number): void {
+  // Seal the current accumulator into aggBuf and clear acc.
+  // push() opens the correct next bucket after calling this, so there
+  // are no synthetic empty buckets for gaps.
+  private sealAndAdvance(): void {
     if (this.acc === null) return;
     const pt = sealAccumulator(this.acc);
     this.aggBuf[this.aggHead] = pt;
@@ -212,9 +217,6 @@ export class LiveBuffer {
       this.aggTail = (this.aggTail + 1) % this.maxAgg;
     }
     this.acc = null;
-    // If there's a gap of more than one bucket, skip directly to the
-    // right one rather than emitting empty intermediate buckets.
-    void nextT; // consumed by push() which opens the correct bucket
   }
 
   // Return sealed buckets plus the open accumulator (if any) as
@@ -237,11 +239,13 @@ export class LiveBuffer {
   }
 
   // Return live raw samples oldest-first.
+  // Returns copies — mutating the returned objects does not affect internal state.
   raw(): RawSample[] {
     if (this.rawCount === 0) return [];
     const result: RawSample[] = new Array(this.rawCount);
     for (let i = 0; i < this.rawCount; i++) {
-      result[i] = this.rawBuf[(this.rawTail + i) % this.maxRaw];
+      const s = this.rawBuf[(this.rawTail + i) % this.maxRaw];
+      result[i] = { t: s.t, hr: s.hr, spo2: s.spo2, activity: s.activity, stage: s.stage, flags: s.flags };
     }
     return result;
   }
