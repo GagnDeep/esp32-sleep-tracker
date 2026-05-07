@@ -141,6 +141,44 @@ export function formatTime(input: string | number | Date, fmt: 'short' | 'long' 
   }
 }
 
+// ---------- sleep score bands ----------
+
+export type ScoreBand = 'excellent' | 'good' | 'fair' | 'poor';
+
+/**
+ * Map a sleep score (0-100) to a band label.
+ * Bands: 0-49 poor, 50-69 fair, 70-84 good, 85-100 excellent.
+ * Sentinel values (NaN, undefined, negative): 'poor'.
+ */
+export function scoreBand(score: number): ScoreBand {
+  if (!isFinite(score) || score < 0) return 'poor';
+  if (score >= 85) return 'excellent';
+  if (score >= 70) return 'good';
+  if (score >= 50) return 'fair';
+  return 'poor';
+}
+
+/** Human-readable label for a band, e.g., 'Excellent'. */
+export function scoreBandLabel(band: ScoreBand): string {
+  const labels: Record<ScoreBand, string> = {
+    excellent: 'Excellent',
+    good: 'Good',
+    fair: 'Fair',
+    poor: 'Poor',
+  };
+  return labels[band];
+}
+
+export function scoreBandTone(band: ScoreBand): 'good' | 'accent' | 'warn' | 'bad' {
+  const tones: Record<ScoreBand, 'good' | 'accent' | 'warn' | 'bad'> = {
+    excellent: 'good',
+    good: 'accent',
+    fair: 'warn',
+    poor: 'bad',
+  };
+  return tones[band];
+}
+
 // "Hour:minute" string from minutes-of-day, used for alarm rendering.
 // Doesn't take displayTimezone — minutes-of-day are already local to
 // the device's wall clock.

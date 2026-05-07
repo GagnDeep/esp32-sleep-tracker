@@ -10,6 +10,9 @@ import {
   formatHourMin,
   formatDateTime,
   displayTimezone,
+  scoreBand,
+  scoreBandLabel,
+  scoreBandTone,
 } from '../format';
 
 describe('formatBpm', () => {
@@ -104,5 +107,47 @@ describe('formatDateTime tz behaviour', () => {
 
   it('returns em-dash for unparseable input', () => {
     expect(formatDateTime('not-a-date')).toBe('—');
+  });
+});
+
+describe('scoreBand', () => {
+  it('returns poor for 0 and 49', () => {
+    expect(scoreBand(0)).toBe('poor');
+    expect(scoreBand(49)).toBe('poor');
+  });
+  it('returns fair for 50 and 69', () => {
+    expect(scoreBand(50)).toBe('fair');
+    expect(scoreBand(69)).toBe('fair');
+  });
+  it('returns good for 70 and 84', () => {
+    expect(scoreBand(70)).toBe('good');
+    expect(scoreBand(84)).toBe('good');
+  });
+  it('returns excellent for 85 and 100', () => {
+    expect(scoreBand(85)).toBe('excellent');
+    expect(scoreBand(100)).toBe('excellent');
+  });
+  it('returns poor for sentinel values', () => {
+    expect(scoreBand(NaN)).toBe('poor');
+    expect(scoreBand(undefined as unknown as number)).toBe('poor');
+    expect(scoreBand(-5)).toBe('poor');
+  });
+});
+
+describe('scoreBandLabel', () => {
+  it('returns capitalised label for each band', () => {
+    expect(scoreBandLabel('excellent')).toBe('Excellent');
+    expect(scoreBandLabel('good')).toBe('Good');
+    expect(scoreBandLabel('fair')).toBe('Fair');
+    expect(scoreBandLabel('poor')).toBe('Poor');
+  });
+});
+
+describe('scoreBandTone', () => {
+  it('maps bands to StatCard tones', () => {
+    expect(scoreBandTone('excellent')).toBe('good');
+    expect(scoreBandTone('good')).toBe('accent');
+    expect(scoreBandTone('fair')).toBe('warn');
+    expect(scoreBandTone('poor')).toBe('bad');
   });
 });
