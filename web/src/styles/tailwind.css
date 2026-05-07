@@ -9,6 +9,12 @@
 :root {
   --surface:       16% 0.012 270;   /* near-black */
   --surface-2:     20% 0.014 270;
+  /* surface-3: cards-on-cards — slightly lighter than surface-2 in dark */
+  --surface-3:     25% 0.016 270;
+  /* surface-overlay: dialog/sheet/drawer backgrounds — more elevated than surface-2 */
+  --surface-overlay: 22% 0.014 270;
+  /* hairline: 1px borders, very subtle, near-background */
+  --hairline:      28% 0.012 270;
   --ink:           96% 0.005 250;
   --ink-muted:     72% 0.012 260;
   --accent:        78% 0.18 200;    /* cyan-blue */
@@ -22,6 +28,9 @@
   --motion-fast:   120ms;
   --motion-normal: 200ms;
   --motion-slow:   320ms;
+  /* Motion tokens for emphasized transitions (page, modal) */
+  --ease-emphasis: cubic-bezier(.2, .8, .2, 1);
+  --dur-page:      240ms;
   color-scheme: dark;
 }
 :root[data-theme="dark"] {
@@ -30,6 +39,12 @@
 :root[data-theme="light"], .light {
   --surface:       98% 0.005 250;
   --surface-2:     94% 0.008 250;
+  /* surface-3: cards-on-cards — slightly darker than surface-2 in light */
+  --surface-3:     90% 0.010 250;
+  /* surface-overlay: dialog/sheet/drawer backgrounds — more elevated than surface-2 */
+  --surface-overlay: 96% 0.008 250;
+  /* hairline: 1px borders, very subtle, near-background */
+  --hairline:      86% 0.008 250;
   --ink:           20% 0.010 270;
   --ink-muted:     50% 0.010 260;
   --accent:        55% 0.18 200;
