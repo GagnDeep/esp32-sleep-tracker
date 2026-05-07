@@ -5,6 +5,8 @@
 import {
   connectionStatus,
   liveStats,
+  otaProgress,
+  type OtaProgress,
   wsDrops,
   wsRetryAt,
   wsState,
@@ -20,7 +22,14 @@ export interface StageEvent  { type: 'stage';  value: number; }
 export interface AlarmEvent  { type: 'alarm';  kind: string; }
 export interface StatusEvent { type: 'status'; value: string; }
 export interface DropsEvent  { type: 'drops';  count: number; }
-export interface OtaProgressEvent { type: 'ota_progress'; pct: number; phase?: string; }
+export interface OtaProgressEvent {
+  type: 'ota_progress';
+  phase?: string;
+  pct?: number;
+  bytes?: number;
+  bytes_total?: number;
+  error_message?: string;
+}
 export type WsEvent =
   | SampleEvent | StageEvent | AlarmEvent
   | StatusEvent | DropsEvent | OtaProgressEvent;
@@ -56,7 +65,7 @@ export const __test = {
     return listeners.has(type);
   },
   dispatch(e: WsEvent): void {
-    dispatch(e);
+    handleWsMessage(e);
   },
 };
 
@@ -72,7 +81,8 @@ function nextBackoffMs(n: number): number {
   return Math.max(0, Math.round(base + jitter));
 }
 
-function dispatch(e: WsEvent) {
+/** Exported so unit tests can drive the dispatcher without a real socket. */
+export function handleWsMessage(e: WsEvent): void {
   switch (e.type) {
     case 'sample':
       liveStats.value = {
@@ -90,6 +100,28 @@ function dispatch(e: WsEvent) {
     case 'drops':
       wsDrops.value = e.count;
       break;
+    case 'ota_progress': {
+      const prev = otaProgress.value;
+      const next: OtaProgress = {
+        phase: (e.phase as OtaProgress['phase']) ?? 'downloading',
+        pct: typeof e.pct === 'number' ? e.pct : 0,
+        bytes: typeof e.bytes === 'number' ? e.bytes : 0,
+        bytesTotal: typeof e.bytes_total === 'number' ? e.bytes_total : 0,
+        errorMessage: e.error_message,
+        startedAt: prev?.startedAt ?? Date.now(),
+      };
+      // Compute throughput from prev sample if available, never negative.
+      if (prev && next.bytes > prev.bytes && prev.startedAt) {
+        const dtSec = (Date.now() - prev.startedAt) / 1000;
+        if (dtSec > 0.5) {
+          next.bytesPerSec = (next.bytes - prev.bytes) / dtSec;
+        } else {
+          next.bytesPerSec = prev.bytesPerSec;
+        }
+      }
+      otaProgress.value = next;
+      break;
+    }
   }
   listeners.get(e.type)?.forEach(fn => fn(e));
 }
@@ -109,7 +141,7 @@ export function connectWs() {
     });
     socket.addEventListener('message', (ev) => {
       try {
-        dispatch(JSON.parse(ev.data));
+        handleWsMessage(JSON.parse(ev.data));
       } catch {
         // ignore malformed frames; keep the channel alive
       }
