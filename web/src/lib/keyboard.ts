@@ -50,6 +50,7 @@ let nextId = 0;
 interface PendingSequence {
   first: ParsedKey;
   timerId: ReturnType<typeof setTimeout>;
+  fromInput: boolean; // whether the first key came from an input element
 }
 let pendingSequence: PendingSequence | null = null;
 
@@ -94,8 +95,11 @@ function parseKey(combo: string): ParsedKey {
     }
   }
 
-  // If for some reason keyParts is empty (only modifiers), fall back
-  const key = keyParts.join('+') || combo;
+  const key = keyParts.join('+');
+
+  if (keyParts.length === 0 || key === '') {
+    throw new TypeError(`Invalid shortcut combo: '${combo}' has no key`);
+  }
 
   return { key, mod, shift, alt };
 }
@@ -137,7 +141,15 @@ function isInputElement(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false;
   const tag = target.tagName;
   if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
-  if (target.getAttribute('contenteditable') === 'true') return true;
+  // Use isContentEditable (standard DOM) which handles all valid forms of the
+  // attribute ('true', '', bare, 'plaintext-only'). Fall back to attribute
+  // inspection for environments (e.g. jsdom) that don't implement the property.
+  const el = target as HTMLElement;
+  if (typeof el.isContentEditable === 'boolean') {
+    return el.isContentEditable;
+  }
+  const ce = target.getAttribute('contenteditable');
+  if (ce === 'true' || ce === '' || ce === 'plaintext-only') return true;
   return false;
 }
 
@@ -169,8 +181,11 @@ function handleKeydown(e: Event): void {
         pending.first.alt === first.alt &&
         keyMatches(second, e)
       ) {
-        if (!reg.allowInInput && fromInput) continue;
-        e.preventDefault();
+        // Filter: skip if input-originated at either the first or second key,
+        // unless allowInInput is true.
+        if (!reg.allowInInput && (pending.fromInput || fromInput)) continue;
+        // Only call preventDefault when not in an input (or allowInInput is false)
+        if (!(reg.allowInInput && fromInput)) e.preventDefault();
         reg.handler(e);
       }
     }
@@ -186,10 +201,13 @@ function handleKeydown(e: Event): void {
   for (const reg of registrations) {
     if (!Array.isArray(reg.parsed)) continue;
     const [first] = reg.parsed as readonly [ParsedKey, ParsedKey];
-    if (keyMatches(first, e)) {
-      firstKeyOfSequence = first;
-      break; // All sequences sharing the same first key use the same pending
-    }
+    if (!keyMatches(first, e)) continue;
+    // When the first key comes from an input, only consider registrations with
+    // allowInInput so we don't enter pending state for sequences that shouldn't
+    // fire from inputs.
+    if (fromInput && !reg.allowInInput) continue;
+    firstKeyOfSequence = first;
+    break; // All sequences sharing the same first key use the same pending
   }
 
   if (firstKeyOfSequence !== null) {
@@ -200,7 +218,7 @@ function handleKeydown(e: Event): void {
         pendingSequence = null;
       }
     }, SEQUENCE_TIMEOUT_MS);
-    pendingSequence = { first: captured, timerId };
+    pendingSequence = { first: captured, timerId, fromInput };
     // Don't preventDefault here — the first key alone isn't a shortcut yet.
     return;
   }
@@ -211,7 +229,8 @@ function handleKeydown(e: Event): void {
     const parsed = reg.parsed as ParsedKey;
     if (!keyMatches(parsed, e)) continue;
     if (!reg.allowInInput && fromInput) continue;
-    e.preventDefault();
+    // Only call preventDefault when not in an input (or allowInInput is false)
+    if (!(reg.allowInInput && fromInput)) e.preventDefault();
     reg.handler(e);
   }
 }

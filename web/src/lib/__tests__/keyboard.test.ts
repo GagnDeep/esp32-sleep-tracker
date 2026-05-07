@@ -306,6 +306,71 @@ describe('input filtering', () => {
     document.body.removeChild(input);
     expect(handler).toHaveBeenCalledTimes(1);
   });
+
+  it('does NOT call preventDefault when allowInInput is true and event came from an input', () => {
+    const handler = vi.fn();
+    registerShortcut('?', handler, { allowInInput: true });
+
+    const input = document.createElement('input');
+    document.body.appendChild(input);
+    const evt = fireKey('?', { target: input });
+
+    document.body.removeChild(input);
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(evt.defaultPrevented).toBe(false);
+  });
+
+  it('ignores keydown events from a contenteditable="" (bare attribute) element', () => {
+    const handler = vi.fn();
+    registerShortcut('?', handler);
+
+    const div = document.createElement('div');
+    div.setAttribute('contenteditable', '');
+    document.body.appendChild(div);
+    fireKey('?', { target: div });
+
+    document.body.removeChild(div);
+    expect(handler).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Malformed combos
+// ---------------------------------------------------------------------------
+
+describe('malformed combos', () => {
+  it('throws TypeError for "mod+" (modifier with no key)', () => {
+    expect(() => registerShortcut('mod+', () => {})).toThrow(/no key/);
+  });
+
+  it('throws TypeError when first element of a sequence is malformed', () => {
+    expect(() => registerShortcut(['mod+', 'k'], () => {})).toThrow(/no key/);
+  });
+
+  it('throws TypeError when second element of a sequence is malformed', () => {
+    expect(() => registerShortcut(['g', 'mod+'], () => {})).toThrow(/no key/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Sequence input filtering
+// ---------------------------------------------------------------------------
+
+describe('sequence input filtering', () => {
+  it('does NOT fire sequence when first key came from an input (no allowInInput)', () => {
+    vi.useFakeTimers();
+    const handler = vi.fn();
+    registerShortcut(['g', 'h'], handler);
+
+    const input = document.createElement('input');
+    document.body.appendChild(input);
+    fireKey('g', { target: input }); // first key from input — should block
+    vi.advanceTimersByTime(200);
+    fireKey('h'); // second key from document
+
+    document.body.removeChild(input);
+    expect(handler).not.toHaveBeenCalled();
+  });
 });
 
 // ---------------------------------------------------------------------------
