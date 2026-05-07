@@ -50,6 +50,8 @@ export interface OtaProgress {
   errorMessage?: string;   // populated on phase === 'failed'
   /** Wall-clock ms when this update started, for ETA calc. */
   startedAt?: number;
+  /** Wall-clock ms of the previous sample, for per-interval throughput calc. */
+  sampledAt?: number;
 }
 
 export const otaProgress = signal<OtaProgress | null>(null);

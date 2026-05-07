@@ -109,10 +109,11 @@ export function handleWsMessage(e: WsEvent): void {
         bytesTotal: typeof e.bytes_total === 'number' ? e.bytes_total : 0,
         errorMessage: e.error_message,
         startedAt: prev?.startedAt ?? Date.now(),
+        sampledAt: Date.now(),
       };
-      // Compute throughput from prev sample if available, never negative.
-      if (prev && next.bytes > prev.bytes && prev.startedAt) {
-        const dtSec = (Date.now() - prev.startedAt) / 1000;
+      // Compute throughput from prev sample using per-interval dt, never negative.
+      if (prev && next.bytes > prev.bytes && prev.sampledAt) {
+        const dtSec = (Date.now() - prev.sampledAt) / 1000;
         if (dtSec > 0.5) {
           next.bytesPerSec = (next.bytes - prev.bytes) / dtSec;
         } else {

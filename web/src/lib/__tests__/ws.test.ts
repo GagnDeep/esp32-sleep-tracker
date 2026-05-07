@@ -71,9 +71,8 @@ describe('ota_progress WS event wiring', () => {
     expect(val!.bytesPerSec).toBeUndefined();
   });
 
-  it('subsequent event updates the signal and computes throughput', () => {
-    // First event — establishes a baseline.
-    const t0 = Date.now() - 2000; // Simulate 2 seconds ago.
+  it('subsequent event updates the signal and computes per-interval throughput', () => {
+    // Event 1 at bytes=1000 (t=0s).
     handleWsMessage({
       type: 'ota_progress',
       phase: 'downloading',
@@ -82,10 +81,11 @@ describe('ota_progress WS event wiring', () => {
       bytes_total: 4000,
     });
 
-    // Manually back-date startedAt so dtSec > 0.5 on the next call.
-    otaProgress.value = { ...otaProgress.value!, startedAt: t0 };
+    // Back-date sampledAt to simulate 1 second elapsed before event 2.
+    const t1 = Date.now() - 1000;
+    otaProgress.value = { ...otaProgress.value!, sampledAt: t1 };
 
-    // Second event with more bytes downloaded.
+    // Event 2 at bytes=2000 (~1 second later).
     handleWsMessage({
       type: 'ota_progress',
       phase: 'downloading',
@@ -94,13 +94,34 @@ describe('ota_progress WS event wiring', () => {
       bytes_total: 4000,
     });
 
-    const val = otaProgress.value;
-    expect(val).not.toBeNull();
-    expect(val!.pct).toBe(50);
-    expect(val!.bytes).toBe(2000);
-    // bytesPerSec should be positive (1000 bytes over ~2 seconds ≈ 500 B/s).
-    expect(val!.bytesPerSec).toBeTypeOf('number');
-    expect(val!.bytesPerSec!).toBeGreaterThan(0);
+    const after2 = otaProgress.value!;
+    expect(after2.pct).toBe(50);
+    expect(after2.bytes).toBe(2000);
+    // Per-interval rate: 1000 bytes over ~1 second ≈ 1000 B/s.
+    expect(after2.bytesPerSec).toBeTypeOf('number');
+    expect(after2.bytesPerSec!).toBeGreaterThan(0);
+
+    // Event 3 at bytes=2100 (~10 seconds after event 2).
+    // Without the fix: rate would be (2100 - 1000) / 11 ≈ 100 B/s (session avg).
+    // With fix: rate should be (2100 - 2000) / 10 = 10 B/s (per-interval).
+    const t2 = Date.now() - 10_000;
+    otaProgress.value = { ...otaProgress.value!, sampledAt: t2 };
+
+    handleWsMessage({
+      type: 'ota_progress',
+      phase: 'downloading',
+      pct: 52,
+      bytes: 2100,
+      bytes_total: 4000,
+    });
+
+    const after3 = otaProgress.value!;
+    expect(after3.bytes).toBe(2100);
+    // Per-interval rate: 100 bytes over ~10 seconds ≈ 10 B/s.
+    // A session-average (startedAt-based) would yield ~190 B/s instead.
+    expect(after3.bytesPerSec).toBeTypeOf('number');
+    expect(after3.bytesPerSec!).toBeGreaterThan(0);
+    expect(after3.bytesPerSec!).toBeLessThan(50); // well below session-average ≈ 190
   });
 
   it('failed phase populates errorMessage', () => {
