@@ -87,7 +87,9 @@ export function SessionDetail() {
     }
   }, 800), [id]);
 
-  useEffect(() => () => { patchTags.cancel(); patchNotes.cancel(); }, [patchTags, patchNotes]);
+  // On unmount, flush any pending debounced PATCH immediately so edits
+  // are not lost when the user navigates away during the debounce window.
+  useEffect(() => () => { patchTags.flush(); patchNotes.flush(); }, [patchTags, patchNotes]);
 
   const updateTags = (next: string[]) => {
     setTags(next);
