@@ -1,6 +1,4 @@
-// Arrow keys move both focus AND selection (Apple-style segmented control).
-// Disabled options are skipped during keyboard navigation.
-
+// Arrow keys move focus + selection (Apple-style). Disabled options are skipped.
 import { useRef } from 'preact/hooks';
 import type { VNode } from 'preact';
 
@@ -41,7 +39,6 @@ export function SegmentedControl<T extends string>(
   function selectOption(opt: SegmentedOption<T>) {
     if (opt.disabled || opt.value === value) return;
     onChange(opt.value);
-    // Focus the newly selected button.
     const el = containerRef.current?.querySelector<HTMLButtonElement>(
       `[data-value="${opt.value}"]`,
     );
@@ -74,11 +71,7 @@ export function SegmentedControl<T extends string>(
       role="tablist"
       aria-label={ariaLabel}
       onKeyDown={handleKeyDown}
-      class={[
-        'inline-flex rounded-full bg-surface-2',
-        sc.container,
-        cls ?? '',
-      ].filter(Boolean).join(' ')}
+      class={['inline-flex rounded-full bg-surface-2', sc.container, cls ?? ''].filter(Boolean).join(' ')}
     >
       {options.map((opt) => {
         const selected = opt.value === value;

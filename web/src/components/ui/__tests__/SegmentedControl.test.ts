@@ -1,7 +1,9 @@
-// @vitest-environment node
-import { describe, it, expect, vi } from 'vitest';
+/** @vitest-environment jsdom */
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { h } from 'preact';
 import { render } from 'preact-render-to-string';
+import { render as domRender } from 'preact';
+import { act } from 'preact/test-utils';
 import { SegmentedControl } from '../SegmentedControl';
 import type { SegmentedControlProps } from '../SegmentedControl';
 
@@ -36,7 +38,6 @@ describe('SegmentedControl', () => {
 
   it('selected option has aria-selected="true"', () => {
     const out = make({ value: '28d' });
-    // Ensure the selected tab has aria-selected="true"
     expect(out).toContain('aria-selected="true"');
   });
 
@@ -60,10 +61,8 @@ describe('SegmentedControl', () => {
   });
 
   it('selected button has tabindex 0, others have -1', () => {
-    // preact-render-to-string lowercases tabIndex → tabindex in the HTML output.
     const out = make({ value: '7d' });
     expect(out).toContain('tabindex="0"');
-    // Three non-selected options
     const negOnes = (out.match(/tabindex="-1"/g) ?? []).length;
     expect(negOnes).toBe(OPTIONS.length - 1);
   });
@@ -76,7 +75,7 @@ describe('SegmentedControl', () => {
   it('renders shortLabel span with sm:hidden class', () => {
     const out = make();
     expect(out).toContain('sm:hidden');
-    expect(out).toContain('7d'); // shortLabel value
+    expect(out).toContain('7d');
   });
 
   it('disabled option renders with disabled attribute', () => {
@@ -87,12 +86,113 @@ describe('SegmentedControl', () => {
     const out = make({ options: opts });
     expect(out).toContain('disabled');
   });
+});
 
-  it('clicking a non-selected enabled option triggers onChange', () => {
-    // preact-render-to-string is SSR-only; verify onChange prop is wired via
-    // a mock — click simulation is tested via the role/tab wiring above.
+describe('keyboard / click behavior', () => {
+  let root: HTMLDivElement;
+
+  function setup(value: Range, onChange: (v: Range) => void, opts = OPTIONS) {
+    root = document.createElement('div');
+    document.body.appendChild(root);
+    act(() => {
+      domRender(
+        h(SegmentedControl<Range>, { options: opts, value, onChange }),
+        root,
+      );
+    });
+    return root.querySelectorAll('button');
+  }
+
+  afterEach(() => {
+    if (root) {
+      domRender(null as unknown as ReturnType<typeof h>, root);
+      root.remove();
+    }
+  });
+
+  it('ArrowRight moves selection to next enabled option', () => {
     const onChange = vi.fn();
-    // Just confirm the component renders without throwing when onChange is provided.
-    expect(() => make({ onChange })).not.toThrow();
+    const buttons = setup('7d', onChange);
+    act(() => { buttons[0].focus(); });
+    act(() => { buttons[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })); });
+    expect(onChange).toHaveBeenCalledWith('28d');
+  });
+
+  it('ArrowRight wraps from last to first enabled option', () => {
+    const onChange = vi.fn();
+    const buttons = setup('all', onChange);
+    act(() => { buttons[3].focus(); });
+    act(() => { buttons[3].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })); });
+    expect(onChange).toHaveBeenCalledWith('7d');
+  });
+
+  it('ArrowLeft moves selection to previous enabled option', () => {
+    const onChange = vi.fn();
+    const buttons = setup('28d', onChange);
+    act(() => { buttons[1].focus(); });
+    act(() => { buttons[1].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })); });
+    expect(onChange).toHaveBeenCalledWith('7d');
+  });
+
+  it('ArrowLeft wraps from first to last enabled option', () => {
+    const onChange = vi.fn();
+    const buttons = setup('7d', onChange);
+    act(() => { buttons[0].focus(); });
+    act(() => { buttons[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })); });
+    expect(onChange).toHaveBeenCalledWith('all');
+  });
+
+  it('Home jumps to first enabled option', () => {
+    const onChange = vi.fn();
+    const buttons = setup('90d', onChange);
+    act(() => { buttons[2].focus(); });
+    act(() => { buttons[2].dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true })); });
+    expect(onChange).toHaveBeenCalledWith('7d');
+  });
+
+  it('End jumps to last enabled option', () => {
+    const onChange = vi.fn();
+    const buttons = setup('7d', onChange);
+    act(() => { buttons[0].focus(); });
+    act(() => { buttons[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true })); });
+    expect(onChange).toHaveBeenCalledWith('all');
+  });
+
+  it('ArrowRight skips disabled options', () => {
+    const onChange = vi.fn();
+    const opts = [
+      { value: '7d'  as Range, label: '7 days' },
+      { value: '28d' as Range, label: '28 days', disabled: true },
+      { value: '90d' as Range, label: '90 days' },
+    ] as const;
+    const buttons = setup('7d', onChange, opts);
+    act(() => { buttons[0].focus(); });
+    act(() => { buttons[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })); });
+    expect(onChange).toHaveBeenCalledWith('90d');
+  });
+
+  it('clicking a non-selected enabled option calls onChange', () => {
+    const onChange = vi.fn();
+    const buttons = setup('7d', onChange);
+    act(() => { buttons[1].click(); });
+    expect(onChange).toHaveBeenCalledWith('28d');
+  });
+
+  it('clicking the already-selected option does NOT call onChange', () => {
+    const onChange = vi.fn();
+    const buttons = setup('7d', onChange);
+    act(() => { buttons[0].click(); });
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('clicking a disabled option does NOT call onChange', () => {
+    const onChange = vi.fn();
+    const opts = [
+      { value: '7d'  as Range, label: '7 days' },
+      { value: '28d' as Range, label: '28 days', disabled: true },
+    ] as const;
+    const buttons = setup('7d', onChange, opts);
+    act(() => { buttons[1].click(); });
+    expect(onChange).not.toHaveBeenCalled();
   });
 });
