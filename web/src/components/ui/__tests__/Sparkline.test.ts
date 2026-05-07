@@ -46,14 +46,14 @@ describe('Sparkline', () => {
   it('produces a flat mid-line for equal values', () => {
     const out = svg([5, 5, 5, 5]);
     expect(out).toContain('<path');
-    // All y-coords should be the same (mid-point = strokeWidth/2 + yRange/2)
-    // With height=20, strokeWidth=1.5: inset=0.75, yRange=18.5, midY=0.75+18.5/2=10.00
     const dMatch = out.match(/d="([^"]+)"/);
     expect(dMatch).not.toBeNull();
-    // Check all L commands share the same y as the M command
+    // All y-coords must equal height/2 = 10 exactly (flat-line anchoring fix).
     const coords = dMatch![1].match(/[ML][\d.]+,([\d.]+)/g) ?? [];
     const ys = coords.map(c => c.replace(/[ML][\d.]+,/, ''));
-    expect(ys.every(y => y === ys[0])).toBe(true);
+    expect(ys.length).toBeGreaterThan(0);
+    // height/2 = 10; toFixed(2) renders "10.00", so compare as float
+    expect(ys.every(y => parseFloat(y) === 10)).toBe(true);
   });
 
   it('inserts pen-up (new M) across NaN gaps', () => {
