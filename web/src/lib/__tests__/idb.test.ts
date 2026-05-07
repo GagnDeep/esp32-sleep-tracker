@@ -84,12 +84,29 @@ function makeFakeTx(db: DbData, storeNames: string[], _mode: string) {
   return tx;
 }
 
+// Extended IDBFactory shim that also exposes the most-recently opened db object
+// so tests can trigger internal callbacks (e.g. versionchange).
+interface FakeIdbFactory extends IDBFactory {
+  lastDb: FakeDb | null;
+}
+
+interface FakeDb {
+  objectStoreNames: { contains(n: string): boolean };
+  createObjectStore(n: string): void;
+  transaction(storeNames: string | string[], mode: string): ReturnType<typeof makeFakeTx>;
+  close(): void;
+  onversionchange: (() => void) | null;
+  _fireVersionChange(): void;
+}
+
 // In-memory database registry (survives across open calls but resets per suite
 // via buildFakeIdb()).
-function buildFakeIdb(): IDBFactory {
+function buildFakeIdb(): FakeIdbFactory {
   const databases = new Map<string, { version: number; stores: DbData }>();
+  let lastDb: FakeDb | null = null;
 
   const idbFactory = {
+    get lastDb() { return lastDb; },
     open(name: string, version: number) {
       const req: {
         result: unknown;
@@ -116,6 +133,7 @@ function buildFakeIdb(): IDBFactory {
           databases.set(name, { version, stores });
         }
 
+        let closed = false;
         const db = {
           objectStoreNames: {
             contains(n: string) { return stores.has(n); },
@@ -124,11 +142,18 @@ function buildFakeIdb(): IDBFactory {
             if (!stores.has(n)) stores.set(n, new Map());
           },
           transaction(storeNames: string | string[], mode: string) {
+            if (closed) throw new Error('IDBDatabase: connection is closed');
             const names = Array.isArray(storeNames) ? storeNames : [storeNames];
             return makeFakeTx(stores, names, mode);
           },
-          close() { /* no-op for in-memory */ },
+          close() { closed = true; },
+          onversionchange: null as (() => void) | null,
+          // Expose a test helper to fire the versionchange event.
+          _fireVersionChange() { db.onversionchange?.(); },
         };
+
+        // Track the most recently opened db so tests can access it.
+        lastDb = db;
 
         // Set result before firing any callbacks — mirrors real IDB behaviour
         // where IDBOpenDBRequest.result is available inside onupgradeneeded.
@@ -151,14 +176,15 @@ function buildFakeIdb(): IDBFactory {
     },
   };
 
-  return idbFactory as unknown as IDBFactory;
+  return idbFactory as unknown as FakeIdbFactory;
 }
 
 // ── Module import ────────────────────────────────────────────────────────────
 // We import after installing the shim so the module sees indexedDB defined.
 
 // Install a fresh shim before anything is imported.
-(globalThis as unknown as Record<string, unknown>)['indexedDB'] = buildFakeIdb();
+let fakeIdb = buildFakeIdb();
+(globalThis as unknown as Record<string, unknown>)['indexedDB'] = fakeIdb;
 
 import { openStore, closeAll } from '../idb';
 
@@ -166,7 +192,8 @@ import { openStore, closeAll } from '../idb';
 
 beforeEach(async () => {
   // Fresh shim + fresh module state before every test.
-  (globalThis as unknown as Record<string, unknown>)['indexedDB'] = buildFakeIdb();
+  fakeIdb = buildFakeIdb();
+  (globalThis as unknown as Record<string, unknown>)['indexedDB'] = fakeIdb;
   await closeAll();
 });
 
@@ -278,6 +305,41 @@ describe('repeated openStore calls', () => {
     const h2 = openStore<string>('shared');
     await h1.put('k', 'from-h1');
     expect(await h2.get('k')).toBe('from-h1');
+  });
+});
+
+describe('version-upgrade: close old connection before re-opening', () => {
+  it('opening a second distinct store works after the first store is used', async () => {
+    // Open store 'alpha' and write a value — this holds a v1 connection.
+    const alpha = openStore<string>('alpha');
+    await alpha.put('k', 'from-alpha');
+
+    // Now open 'beta' (new store → version bump). The fix must close the v1
+    // connection so the v2 open is not blocked.
+    const beta = openStore<string>('beta');
+    await beta.put('k', 'from-beta');
+
+    // Both stores must be readable with their original data intact.
+    expect(await alpha.get('k')).toBe('from-alpha');
+    expect(await beta.get('k')).toBe('from-beta');
+  });
+});
+
+describe('versionchange listener', () => {
+  it('fires onversionchange closes the connection; subsequent transaction rejects', async () => {
+    // Open a store to get a live connection.
+    const store = openStore<string>('vc-store');
+    await store.put('x', 'y'); // ensure connection is open
+
+    // Grab the underlying fake db and fire versionchange (simulates another tab
+    // opening the DB at a higher version).
+    const db = fakeIdb.lastDb!;
+    expect(db).not.toBeNull();
+    db._fireVersionChange();
+
+    // After versionchange, the db must be marked closed. Any further
+    // transaction attempt should reject.
+    expect(() => db.transaction('vc-store', 'readonly')).toThrow('closed');
   });
 });
 

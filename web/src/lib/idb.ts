@@ -66,11 +66,19 @@ function txDone(tx: IDBTransaction): Promise<void> {
  * If `neededStore` is not yet in `knownStores`, we bump the version so
  * `onupgradeneeded` can create it.
  */
-function openDb(neededStore: string): Promise<IDBDatabase> {
+async function openDb(neededStore: string): Promise<IDBDatabase> {
   const idb: IDBFactory = globalThis.indexedDB;
 
   if (knownStores.has(neededStore) && dbPromise !== null) {
     return dbPromise;
+  }
+
+  // Close the old connection before re-opening at a higher version.
+  // Without this, the pending open request at the new version will be blocked
+  // by the still-live connection and `onblocked` fires → the promise rejects.
+  if (dbPromise !== null) {
+    const oldDb = await dbPromise.catch(() => null);
+    oldDb?.close();
   }
 
   // Need a fresh open (new store or first call).
@@ -94,7 +102,16 @@ function openDb(neededStore: string): Promise<IDBDatabase> {
       void evt; // version info not needed here
     };
 
-    openReq.onsuccess = () => resolve(openReq.result);
+    openReq.onsuccess = () => {
+      const db = openReq.result;
+      // If another tab (or this tab) triggers a version upgrade, cleanly drop
+      // the connection so the new open isn't blocked.
+      db.onversionchange = () => {
+        db.close();
+        dbPromise = null;
+      };
+      resolve(db);
+    };
     openReq.onerror = () =>
       reject(new Error('IDB open failed', { cause: openReq.error }));
     openReq.onblocked = () =>
