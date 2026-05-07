@@ -53,13 +53,15 @@ interface Accumulator {
 }
 
 // hr=0 and hr=0xffff are sentinels — match formatBpm convention.
+// NaN is also rejected: !!NaN === false, mirroring the !bpm guard in formatBpm.
 function isValidHr(hr: number): boolean {
-  return hr !== 0 && hr !== 0xffff;
+  return !!hr && hr !== 0xffff;
 }
 
 // spo2=0 and spo2>=200 are sentinels — match formatPct convention.
+// NaN is also rejected: !!NaN === false, mirroring the !pct guard in formatPct.
 function isValidSpo2(spo2: number): boolean {
-  return spo2 !== 0 && spo2 < 200;
+  return !!spo2 && spo2 < 200;
 }
 
 function sealAccumulator(acc: Accumulator): AggregatedPoint {

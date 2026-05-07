@@ -204,6 +204,40 @@ describe('sentinel handling', () => {
     expect(pt.spo2Avg).toBe(0);
     expect(pt.spo2Min).toBe(0);
   });
+
+  it('hr=NaN is excluded from hrAvg/hrMax (NaN sentinel)', () => {
+    const buf = new LiveBuffer();
+    buf.push(sample(0,  { hr: NaN, spo2: 98 }));
+    buf.push(sample(20, { hr: 75,  spo2: 98 }));
+
+    const pt = buf.aggregated()[0];
+    expect(pt.count).toBe(2);
+    expect(Number.isFinite(pt.hrAvg)).toBe(true);
+    expect(pt.hrAvg).toBe(75);
+    expect(pt.hrMax).toBe(75);
+  });
+
+  it('bucket with only hr=NaN yields hrAvg=0, hrMax=0', () => {
+    const buf = new LiveBuffer();
+    buf.push(sample(0, { hr: NaN, spo2: 98 }));
+
+    const pt = buf.aggregated()[0];
+    expect(pt.hrAvg).toBe(0);
+    expect(pt.hrMax).toBe(0);
+    expect(pt.count).toBe(1);
+  });
+
+  it('spo2=NaN is excluded from spo2Avg/spo2Min (NaN sentinel)', () => {
+    const buf = new LiveBuffer();
+    buf.push(sample(0,  { spo2: NaN, hr: 70 }));
+    buf.push(sample(20, { spo2: 97,  hr: 70 }));
+
+    const pt = buf.aggregated()[0];
+    expect(pt.count).toBe(2);
+    expect(Number.isFinite(pt.spo2Avg)).toBe(true);
+    expect(pt.spo2Avg).toBeCloseTo(97);
+    expect(pt.spo2Min).toBe(97);
+  });
 });
 
 // ── Window eviction ───────────────────────────────────────────────────────────
@@ -231,11 +265,14 @@ describe('window eviction', () => {
 
   it('raw samples outside the window are evicted', () => {
     const buf = new LiveBuffer({ windowMs: 2_000, bucketMs: 1_000, maxRaw: 6000 });
-    // Fill 5 seconds at 1 sample/100ms.
+    // Fill 5 seconds at 1 sample/100ms: t=0,100,...,4900 (50 samples).
     for (let i = 0; i < 50; i++) {
       buf.push(sample(i * 100));
     }
     const raws = buf.raw();
+    // latestT=4900; cutoff=4900-2000=2900.
+    // Samples at t=0..2900 (30 samples) evicted; t=3000..4900 (20 samples) remain.
+    expect(raws).toHaveLength(20);
     // All returned raw timestamps must be >= (latestT - windowMs).
     const latestT = raws[raws.length - 1].t;
     for (const s of raws) {
