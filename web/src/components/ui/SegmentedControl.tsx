@@ -1,6 +1,5 @@
 // Arrow keys move focus + selection (Apple-style). Disabled options are skipped.
 import { useRef } from 'preact/hooks';
-import type { VNode } from 'preact';
 
 export interface SegmentedOption<T extends string> {
   value: T;
@@ -29,7 +28,7 @@ const sizeClasses = {
 
 export function SegmentedControl<T extends string>(
   props: SegmentedControlProps<T>,
-): VNode {
+) {
   const { options, value, onChange, size = 'md', ariaLabel, class: cls } = props;
   const containerRef = useRef<HTMLDivElement>(null);
   const sc = sizeClasses[size];
@@ -39,8 +38,9 @@ export function SegmentedControl<T extends string>(
   function selectOption(opt: SegmentedOption<T>) {
     if (opt.disabled || opt.value === value) return;
     onChange(opt.value);
+    const escaped = typeof CSS !== 'undefined' ? CSS.escape(opt.value) : opt.value.replace(/"/g, '\\"');
     const el = containerRef.current?.querySelector<HTMLButtonElement>(
-      `[data-value="${opt.value}"]`,
+      `[data-value="${escaped}"]`,
     );
     el?.focus();
   }
@@ -49,7 +49,8 @@ export function SegmentedControl<T extends string>(
     if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(e.key)) return;
     e.preventDefault();
 
-    const currentIdx = enabledOptions.findIndex((o) => o.value === value);
+    const rawIdx = enabledOptions.findIndex((o) => o.value === value);
+    const currentIdx = rawIdx === -1 ? 0 : rawIdx;
 
     let next: SegmentedOption<T> | undefined;
     if (e.key === 'Home') {
@@ -71,7 +72,7 @@ export function SegmentedControl<T extends string>(
       role="tablist"
       aria-label={ariaLabel}
       onKeyDown={handleKeyDown}
-      class={['inline-flex rounded-full bg-surface-2', sc.container, cls ?? ''].filter(Boolean).join(' ')}
+      class={['inline-flex rounded-full bg-surface-2', sc.container, cls ?? ''].join(' ')}
     >
       {options.map((opt) => {
         const selected = opt.value === value;

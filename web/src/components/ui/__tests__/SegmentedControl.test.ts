@@ -142,6 +142,22 @@ describe('keyboard / click behavior', () => {
     expect(onChange).toHaveBeenCalledWith('all');
   });
 
+  it('ArrowDown moves selection to next enabled option', () => {
+    const onChange = vi.fn();
+    const buttons = setup('7d', onChange);
+    act(() => { buttons[0].focus(); });
+    act(() => { buttons[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })); });
+    expect(onChange).toHaveBeenCalledWith('28d');
+  });
+
+  it('ArrowUp moves selection to previous enabled option', () => {
+    const onChange = vi.fn();
+    const buttons = setup('28d', onChange);
+    act(() => { buttons[1].focus(); });
+    act(() => { buttons[1].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true })); });
+    expect(onChange).toHaveBeenCalledWith('7d');
+  });
+
   it('Home jumps to first enabled option', () => {
     const onChange = vi.fn();
     const buttons = setup('90d', onChange);
@@ -166,6 +182,35 @@ describe('keyboard / click behavior', () => {
       { value: '90d' as Range, label: '90 days' },
     ] as const;
     const buttons = setup('7d', onChange, opts);
+    act(() => { buttons[0].focus(); });
+    act(() => { buttons[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })); });
+    expect(onChange).toHaveBeenCalledWith('90d');
+  });
+
+  it('ArrowLeft when value is not in enabled options lands on last enabled option', () => {
+    const onChange = vi.fn();
+    // '28d' is disabled, so value='28d' won't be found in enabledOptions (rawIdx === -1 → currentIdx = 0)
+    // ArrowLeft from clamped index 0 should wrap to last = '90d'
+    const opts = [
+      { value: '7d'  as Range, label: '7 days' },
+      { value: '28d' as Range, label: '28 days', disabled: true },
+      { value: '90d' as Range, label: '90 days' },
+    ] as const;
+    const buttons = setup('28d', onChange, opts);
+    act(() => { buttons[0].focus(); });
+    act(() => { buttons[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })); });
+    expect(onChange).toHaveBeenCalledWith('90d');
+  });
+
+  it('ArrowRight when value is not in enabled options lands on second enabled option', () => {
+    const onChange = vi.fn();
+    // '28d' is disabled → rawIdx === -1 → currentIdx = 0 → ArrowRight lands on index 1 = '90d'
+    const opts = [
+      { value: '7d'  as Range, label: '7 days' },
+      { value: '28d' as Range, label: '28 days', disabled: true },
+      { value: '90d' as Range, label: '90 days' },
+    ] as const;
+    const buttons = setup('28d', onChange, opts);
     act(() => { buttons[0].focus(); });
     act(() => { buttons[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })); });
     expect(onChange).toHaveBeenCalledWith('90d');
