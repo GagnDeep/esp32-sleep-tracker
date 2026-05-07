@@ -25,7 +25,7 @@ describe('createScrubberState', () => {
 
   it('initialises durationMs correctly', () => {
     const state = createScrubberState(60_000);
-    expect(state.durationMs.value).toBe(60_000);
+    expect(state.durationMs).toBe(60_000);
   });
 });
 
@@ -46,9 +46,11 @@ describe('onCursorChange', () => {
     const fn = vi.fn();
     const unsub = onCursorChange(state, fn);
 
-    // Fire once to verify it works.
+    // subscribe() eagerly calls fn with the current value (null), then we
+    // write once — so callsBefore must be exactly 2.
     state.cursor.value = 1_000;
     const callsBefore = fn.mock.calls.length;
+    expect(callsBefore).toBe(2); // pins subscribe-eager behavior
 
     unsub();
     state.cursor.value = 2_000;
@@ -234,6 +236,24 @@ describe('Scrubber pointer behavior', () => {
     // hover (buttons: 0) — should be ignored
     act(() => { firePointer(track, 'PointerMove', 50, 0); });
     expect(state.cursor.value).toBeNull();
+  });
+
+  it('pointerleave during drag does not clear cursor', () => {
+    const { state, track } = setup();
+
+    // Start drag at center (50px → 50%).
+    act(() => { firePointer(track, 'PointerDown', 50, 1); });
+    expect(state.cursor.value).toBe(50_000);
+
+    // Move past the track edge (200px, still holding button).
+    act(() => { firePointer(track, 'PointerMove', 200, 1); });
+    expect(typeof state.cursor.value).toBe('number');
+
+    // Pointer leaves the bounding box while button is still held — cursor
+    // must NOT be reset to null.
+    act(() => { firePointer(track, 'PointerLeave', 200, 1); });
+    expect(state.cursor.value).not.toBeNull();
+    expect(typeof state.cursor.value).toBe('number');
   });
 });
 

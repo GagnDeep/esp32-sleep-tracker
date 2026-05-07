@@ -1,24 +1,29 @@
-import { signal, computed } from '@preact/signals';
-import type { Signal, ReadonlySignal } from '@preact/signals';
+import { signal } from '@preact/signals';
+import type { Signal } from '@preact/signals';
 import { useRef } from 'preact/hooks';
 import type { VNode } from 'preact';
 
 export interface ScrubberState {
   /** Current cursor time in ms relative to startMs, or null when not active. */
   cursor: Signal<number | null>;
-  /** Total duration in ms (read-only). */
-  durationMs: ReadonlySignal<number>;
+  /** Total duration in ms. Fixed for the lifetime of the state object. */
+  readonly durationMs: number;
 }
 
 export function createScrubberState(durationMs: number): ScrubberState {
-  const _dur = signal(durationMs);
   return {
     cursor: signal<number | null>(null),
-    durationMs: computed(() => _dur.value),
+    durationMs,
   };
 }
 
-/** Subscribe to cursor changes. Returns unsubscribe fn. */
+/**
+ * Subscribe to cursor changes. Returns unsubscribe fn.
+ *
+ * Note: `@preact/signals` `Signal.subscribe` calls `fn` synchronously on
+ * subscription with the current value before any writes occur. Consumers
+ * (e.g. charts) should expect that initial eager call.
+ */
 export function onCursorChange(
   state: ScrubberState,
   fn: (t: number | null) => void,
@@ -26,10 +31,16 @@ export function onCursorChange(
   return state.cursor.subscribe(fn);
 }
 
-/** Map cursor time (ms) to fractional position [0, 1], or null. */
+/**
+ * Map cursor time (ms) to fractional position [0, 1], or null.
+ *
+ * Reads `cursor.value` directly — not itself reactive. Call this inside a
+ * tracking scope (e.g. a `computed` or component render) or subscribe via
+ * `onCursorChange` to react to changes.
+ */
 export function cursorFraction(state: ScrubberState): number | null {
   const t = state.cursor.value;
-  const d = state.durationMs.value;
+  const d = state.durationMs;
   if (t === null || d === 0) return null;
   return Math.max(0, Math.min(1, t / d));
 }
@@ -63,7 +74,7 @@ export function Scrubber(props: ScrubberProps): VNode {
   const trackRef = useRef<HTMLDivElement>(null);
 
   const cursor = state.cursor.value;
-  const dur = state.durationMs.value;
+  const dur = state.durationMs;
   const frac = cursorFraction(state);
   const pct = frac !== null ? `${(frac * 100).toFixed(3)}%` : '0%';
   const isActive = cursor !== null;
@@ -88,7 +99,8 @@ export function Scrubber(props: ScrubberProps): VNode {
     (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
   }
 
-  function onPointerLeave() {
+  function onPointerLeave(e: PointerEvent) {
+    if (e.buttons !== 0) return;
     state.cursor.value = null;
   }
 
@@ -114,6 +126,7 @@ export function Scrubber(props: ScrubberProps): VNode {
       aria-valuemin={0}
       aria-valuemax={dur}
       aria-valuenow={cursor ?? 0}
+      aria-valuetext={cursor !== null ? formatLabel(cursor) : undefined}
       class={[
         'relative flex items-center w-full select-none outline-none',
         'h-7 cursor-pointer rounded-full',
