@@ -201,6 +201,16 @@ afterEach(async () => {
   await closeAll();
 });
 
+/** Run `fn` with indexedDB temporarily removed from globalThis. */
+async function withNoIdb(fn: () => Promise<void>) {
+  const saved = (globalThis as unknown as Record<string, unknown>)['indexedDB'];
+  delete (globalThis as unknown as Record<string, unknown>)['indexedDB'];
+  await closeAll();
+  try { await fn(); } finally {
+    (globalThis as unknown as Record<string, unknown>)['indexedDB'] = saved;
+  }
+}
+
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 describe('basic put / get', () => {
@@ -325,6 +335,32 @@ describe('version-upgrade: close old connection before re-opening', () => {
   });
 });
 
+describe('concurrent openDb for two new stores', () => {
+  it('two parallel openStore calls for new stores both succeed', async () => {
+    const sa = openStore<string>('par-a');
+    const sb = openStore<string>('par-b');
+    await Promise.all([sa.put('k', 'va'), sb.put('k', 'vb')]);
+    expect(await sa.get('k')).toBe('va');
+    expect(await sb.get('k')).toBe('vb');
+  });
+});
+
+describe('closeAll resets state', () => {
+  it('closeAll resets internal state so the store can be reopened', async () => {
+    const s = openStore<string>('reset');
+    await s.put('k', 'v');
+    await closeAll();
+    // Replace the shim after closeAll so the new openStore gets a clean db,
+    // matching real IDB behaviour where a fresh module state starts empty.
+    fakeIdb = buildFakeIdb();
+    (globalThis as unknown as Record<string, unknown>)['indexedDB'] = fakeIdb;
+    // After closeAll + fresh shim, the wrapper should not throw and should
+    // return undefined for a key that was only in the old db.
+    const s2 = openStore<string>('reset');
+    expect(await s2.get('k')).toBeUndefined();
+  });
+});
+
 describe('versionchange listener', () => {
   it('fires onversionchange closes the connection; subsequent transaction rejects', async () => {
     // Open a store to get a live connection.
@@ -349,62 +385,37 @@ describe('no-op stub when indexedDB is unavailable', () => {
   // stub synchronously — so the stub path is real code, not mocking the module.
 
   it('get resolves undefined', async () => {
-    const saved = (globalThis as unknown as Record<string, unknown>)['indexedDB'];
-    delete (globalThis as unknown as Record<string, unknown>)['indexedDB'];
-    await closeAll();
-    try {
+    await withNoIdb(async () => {
       const store = openStore<string>('any');
       expect(await store.get('k')).toBeUndefined();
-    } finally {
-      (globalThis as unknown as Record<string, unknown>)['indexedDB'] = saved;
-    }
+    });
   });
 
   it('put resolves without error', async () => {
-    const saved = (globalThis as unknown as Record<string, unknown>)['indexedDB'];
-    delete (globalThis as unknown as Record<string, unknown>)['indexedDB'];
-    await closeAll();
-    try {
+    await withNoIdb(async () => {
       const store = openStore<string>('any');
       await expect(store.put('k', 'v')).resolves.toBeUndefined();
-    } finally {
-      (globalThis as unknown as Record<string, unknown>)['indexedDB'] = saved;
-    }
+    });
   });
 
   it('delete resolves without error', async () => {
-    const saved = (globalThis as unknown as Record<string, unknown>)['indexedDB'];
-    delete (globalThis as unknown as Record<string, unknown>)['indexedDB'];
-    await closeAll();
-    try {
+    await withNoIdb(async () => {
       const store = openStore<string>('any');
       await expect(store.delete('k')).resolves.toBeUndefined();
-    } finally {
-      (globalThis as unknown as Record<string, unknown>)['indexedDB'] = saved;
-    }
+    });
   });
 
   it('keys() resolves []', async () => {
-    const saved = (globalThis as unknown as Record<string, unknown>)['indexedDB'];
-    delete (globalThis as unknown as Record<string, unknown>)['indexedDB'];
-    await closeAll();
-    try {
+    await withNoIdb(async () => {
       const store = openStore<string>('any');
       expect(await store.keys()).toEqual([]);
-    } finally {
-      (globalThis as unknown as Record<string, unknown>)['indexedDB'] = saved;
-    }
+    });
   });
 
   it('clear() resolves without error', async () => {
-    const saved = (globalThis as unknown as Record<string, unknown>)['indexedDB'];
-    delete (globalThis as unknown as Record<string, unknown>)['indexedDB'];
-    await closeAll();
-    try {
+    await withNoIdb(async () => {
       const store = openStore<string>('any');
       await expect(store.clear()).resolves.toBeUndefined();
-    } finally {
-      (globalThis as unknown as Record<string, unknown>)['indexedDB'] = saved;
-    }
+    });
   });
 });

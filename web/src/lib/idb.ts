@@ -34,6 +34,10 @@ let knownStores = new Set<string>();
 // Cached open DB connection.
 let dbPromise: Promise<IDBDatabase> | null = null;
 
+// Serializes concurrent open/upgrade paths so two simultaneous calls for new
+// stores don't race competing version bumps.
+let upgradeChain: Promise<unknown> = Promise.resolve();
+
 // ── Internal helpers ─────────────────────────────────────────────────────────
 
 /** Wrap an IDBRequest in a Promise, surfacing errors as rejected with `cause`. */
@@ -61,17 +65,15 @@ function txDone(tx: IDBTransaction): Promise<void> {
 }
 
 /**
- * Open (or reopen with a version bump) the shared DB.
- *
- * If `neededStore` is not yet in `knownStores`, we bump the version so
- * `onupgradeneeded` can create it.
+ * Perform the actual open (or close-and-reopen with a version bump).
+ * Must only be called from within the upgradeChain to avoid concurrent upgrades.
  */
-async function openDb(neededStore: string): Promise<IDBDatabase> {
-  const idb: IDBFactory = globalThis.indexedDB;
+async function doOpenOrUpgrade(neededStore: string): Promise<IDBDatabase> {
+  // Re-check after the chain wakes us up — an earlier ticket may have already
+  // added the store while we were waiting.
+  if (knownStores.has(neededStore) && dbPromise !== null) return dbPromise;
 
-  if (knownStores.has(neededStore) && dbPromise !== null) {
-    return dbPromise;
-  }
+  const idb: IDBFactory = globalThis.indexedDB;
 
   // Close the old connection before re-opening at a higher version.
   // Without this, the pending open request at the new version will be blocked
@@ -91,7 +93,7 @@ async function openDb(neededStore: string): Promise<IDBDatabase> {
   dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
     const openReq = idb.open(DB_NAME, version);
 
-    openReq.onupgradeneeded = (evt) => {
+    openReq.onupgradeneeded = () => {
       const db = openReq.result;
       // Create any store that doesn't already exist yet.
       for (const name of knownStores) {
@@ -99,26 +101,49 @@ async function openDb(neededStore: string): Promise<IDBDatabase> {
           db.createObjectStore(name);
         }
       }
-      void evt; // version info not needed here
     };
 
     openReq.onsuccess = () => {
       const db = openReq.result;
-      // If another tab (or this tab) triggers a version upgrade, cleanly drop
-      // the connection so the new open isn't blocked.
+      // Another tab opened the DB at a higher version; close our connection
+      // so it isn't blocked.
       db.onversionchange = () => {
         db.close();
         dbPromise = null;
       };
       resolve(db);
     };
-    openReq.onerror = () =>
+    openReq.onerror = () => {
+      // Reset state so a retry starts clean instead of reusing a stale version.
+      knownStores.delete(neededStore);
+      dbPromise = null;
       reject(new Error('IDB open failed', { cause: openReq.error }));
-    openReq.onblocked = () =>
+    };
+    openReq.onblocked = () => {
+      // Reset state so a retry starts clean instead of reusing a stale version.
+      knownStores.delete(neededStore);
+      dbPromise = null;
       reject(new Error('IDB open blocked by existing connection'));
+    };
   });
 
   return dbPromise;
+}
+
+/**
+ * Open (or reopen with a version bump) the shared DB.
+ *
+ * If `neededStore` is not yet in `knownStores`, we bump the version so
+ * `onupgradeneeded` can create it. Concurrent calls for new stores are
+ * serialized via `upgradeChain` so only one open negotiates schema at a time.
+ */
+async function openDb(neededStore: string): Promise<IDBDatabase> {
+  if (knownStores.has(neededStore) && dbPromise !== null) return dbPromise;
+
+  // Serialize concurrent upgrades so we don't race competing version bumps.
+  const ticket = upgradeChain.then(() => doOpenOrUpgrade(neededStore));
+  upgradeChain = ticket.catch(() => undefined); // chain must not break on a single failure
+  return ticket;
 }
 
 // ── No-op stub (when indexedDB is unavailable) ───────────────────────────────
@@ -211,4 +236,5 @@ export async function closeAll(): Promise<void> {
     dbPromise = null;
   }
   knownStores = new Set<string>();
+  upgradeChain = Promise.resolve();
 }
