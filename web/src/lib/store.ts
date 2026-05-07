@@ -1,8 +1,8 @@
 // Tiny app-wide state via @preact/signals. Each route reads what it
 // needs; the WS layer publishes into liveStats/connectionStatus.
 
-import { signal } from '@preact/signals';
-import type { DeviceStatus } from './api';
+import { signal, effect } from '@preact/signals';
+import type { DeviceStatus, SessionSummary } from './api';
 
 export interface LiveStats {
   hr: number;       // BPM (0 = invalid)
@@ -39,3 +39,39 @@ export const wsState = signal<WsState>('connecting');
 // Wall-clock time at which the next reconnect attempt is scheduled, or
 // null when connected. The Live banner counts down against this.
 export const wsRetryAt = signal<number | null>(null);
+
+/** Current OTA progress (when an update is in flight). */
+export interface OtaProgress {
+  phase: 'idle' | 'downloading' | 'verifying' | 'applying' | 'rebooting' | 'failed';
+  pct: number;             // 0-100
+  bytes: number;           // bytes received so far
+  bytesTotal: number;      // total bytes to receive (0 if unknown)
+  bytesPerSec?: number;    // optional throughput
+  errorMessage?: string;   // populated on phase === 'failed'
+  /** Wall-clock ms when this update started, for ETA calc. */
+  startedAt?: number;
+}
+
+export const otaProgress = signal<OtaProgress | null>(null);
+
+/** Persistent goals (target_sleep_min, target_score). Phase A skeleton: defaults. */
+export interface Goals {
+  targetSleepMin: number;  // e.g. 480 (8h)
+  targetScore: number;     // e.g. 80
+}
+
+const GOALS_KEY = 'goals.v1';
+function readGoals(): Goals {
+  try {
+    const raw = localStorage.getItem(GOALS_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch { /* ignore */ }
+  return { targetSleepMin: 480, targetScore: 80 };
+}
+export const goals = signal<Goals>(readGoals());
+effect(() => {
+  try { localStorage.setItem(GOALS_KEY, JSON.stringify(goals.value)); } catch { /* ignore */ }
+});
+
+/** Last night's session summary (or null if none recorded). Used by Today screen. */
+export const lastNightSummary = signal<SessionSummary | null>(null);
