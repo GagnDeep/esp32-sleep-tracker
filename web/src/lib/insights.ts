@@ -15,27 +15,34 @@ export interface Insight {
 }
 
 /**
+ * One night's sleep session summary. Mirrors fields the Phase D engine will
+ * pull from `SessionSummary` in `api.ts`.
+ */
+export interface SleepSession {
+  id: string;
+  startIso: string;       // ISO timestamp of session start
+  endIso: string;
+  durationMin: number;
+  /** 0..100. Caller must guarantee this is populated; sessions without a sleep_score should be filtered before generateInsights. */
+  score: number;
+  deepMin?: number;
+  lightMin?: number;
+  remMin?: number;        // currently always 0 in firmware (REM not detected)
+  awakeMin?: number;
+  hrAvg?: number;
+  spo2Avg?: number;
+  hrvRmssd?: number;
+  tags?: ReadonlyArray<string>;
+}
+
+/**
  * Minimal shape the rules engine will read. Mirrors fields the
  * Phase D engine will pull from `SessionSummary` in `api.ts`.
  */
 export interface InsightInput {
   // Each entry is one night's summary. Newest first OR oldest first —
   // generateInsights normalizes by sorting internally.
-  sessions: ReadonlyArray<{
-    id: string;
-    startIso: string;       // ISO timestamp of session start
-    endIso: string;
-    durationMin: number;
-    score: number;          // 0..100
-    deepMin?: number;
-    lightMin?: number;
-    remMin?: number;        // currently always 0 in firmware (REM not detected)
-    awakeMin?: number;
-    hrAvg?: number;
-    spo2Avg?: number;
-    hrvRmssd?: number;
-    tags?: ReadonlyArray<string>;
-  }>;
+  sessions: ReadonlyArray<SleepSession>;
   /** Goals (Phase A2 wires these up). May be undefined in skeleton. */
   goals?: { targetSleepMin?: number; targetScore?: number };
   /** ms timestamp; defaults to Date.now() */
@@ -58,10 +65,11 @@ export function generateInsights(_input: InsightInput): Insight[] {
  * A session is included if:  now - Date.parse(session.startIso) <= days * 86_400_000
  */
 export function trimToTrailingDays(
-  sessions: InsightInput['sessions'],
+  sessions: ReadonlyArray<SleepSession>,
   days: number,
   now: number = Date.now(),
-): InsightInput['sessions'] {
+): ReadonlyArray<SleepSession> {
+  if (days <= 0) return [];
   const cutoff = days * 86_400_000;
   return sessions
     .filter((s) => now - Date.parse(s.startIso) <= cutoff)

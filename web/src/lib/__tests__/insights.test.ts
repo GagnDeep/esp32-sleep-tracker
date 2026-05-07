@@ -5,17 +5,17 @@ import {
   type Insight,
   type InsightInput,
   type InsightSeverity,
+  type SleepSession,
 } from '../insights';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeSession(
-  overrides: Partial<InsightInput['sessions'][number]> & { startIso: string; endIso: string },
-): InsightInput['sessions'][number] {
+let _idCounter = 0;
+function makeSession(overrides: Partial<SleepSession> & { startIso: string; endIso: string }): SleepSession {
   return {
-    id: 'test-id',
+    id: `s-${++_idCounter}`,
     durationMin: 420,
     score: 75,
     ...overrides,
@@ -56,7 +56,7 @@ describe('generateInsights', () => {
 
 describe('trimToTrailingDays', () => {
   it('returns only sessions within `days` of now', () => {
-    const sessions: InsightInput['sessions'] = [
+    const sessions: ReadonlyArray<SleepSession> = [
       // 1 day ago — within 7
       makeSession({ id: 's1', startIso: new Date(BASE_NOW - 1 * 86_400_000).toISOString(), endIso: new Date(BASE_NOW - 1 * 86_400_000 + 480 * 60_000).toISOString() }),
       // 7 days ago exactly — boundary, should be included (now - start === days * 86400000)
@@ -74,7 +74,7 @@ describe('trimToTrailingDays', () => {
 
   it('returns sessions sorted newest first', () => {
     // Provide sessions in oldest-first order and verify they come back newest-first.
-    const sessions: InsightInput['sessions'] = [
+    const sessions: ReadonlyArray<SleepSession> = [
       makeSession({ id: 'old', startIso: new Date(BASE_NOW - 5 * 86_400_000).toISOString(), endIso: new Date(BASE_NOW - 5 * 86_400_000 + 480 * 60_000).toISOString() }),
       makeSession({ id: 'mid', startIso: new Date(BASE_NOW - 3 * 86_400_000).toISOString(), endIso: new Date(BASE_NOW - 3 * 86_400_000 + 480 * 60_000).toISOString() }),
       makeSession({ id: 'new', startIso: new Date(BASE_NOW - 1 * 86_400_000).toISOString(), endIso: new Date(BASE_NOW - 1 * 86_400_000 + 480 * 60_000).toISOString() }),
@@ -84,9 +84,19 @@ describe('trimToTrailingDays', () => {
     expect(result.map((s) => s.id)).toEqual(['new', 'mid', 'old']);
   });
 
-  it('returns [] when days = 0', () => {
-    const sessions: InsightInput['sessions'] = [
-      makeSession({ id: 's1', startIso: new Date(BASE_NOW - 1 * 86_400_000).toISOString(), endIso: new Date(BASE_NOW - 1 * 86_400_000 + 480 * 60_000).toISOString() }),
+  it('returns [] when days = 0, even with a future-dated session', () => {
+    const sessions: ReadonlyArray<SleepSession> = [
+      // future session: starts 1 second after "now"
+      makeSession({
+        id: 'future',
+        startIso: new Date(BASE_NOW + 1000).toISOString(),
+        endIso: new Date(BASE_NOW + 1000 + 480 * 60_000).toISOString(),
+      }),
+      makeSession({
+        id: 'past',
+        startIso: new Date(BASE_NOW - 1 * 86_400_000).toISOString(),
+        endIso: new Date(BASE_NOW - 1 * 86_400_000 + 480 * 60_000).toISOString(),
+      }),
     ];
     const result = trimToTrailingDays(sessions, 0, BASE_NOW);
     expect(result).toEqual([]);
@@ -94,7 +104,7 @@ describe('trimToTrailingDays', () => {
 
   it('includes session on exact boundary (now - startIso === days * 86_400_000)', () => {
     const exactBoundaryStart = BASE_NOW - 28 * 86_400_000;
-    const sessions: InsightInput['sessions'] = [
+    const sessions: ReadonlyArray<SleepSession> = [
       makeSession({
         id: 'boundary',
         startIso: new Date(exactBoundaryStart).toISOString(),
@@ -108,7 +118,7 @@ describe('trimToTrailingDays', () => {
 
   it('excludes session one millisecond past the boundary', () => {
     const justOutside = BASE_NOW - 28 * 86_400_000 - 1;
-    const sessions: InsightInput['sessions'] = [
+    const sessions: ReadonlyArray<SleepSession> = [
       makeSession({
         id: 'just-outside',
         startIso: new Date(justOutside).toISOString(),
@@ -125,17 +135,12 @@ describe('trimToTrailingDays', () => {
 // interface shapes drift from the spec).
 // ---------------------------------------------------------------------------
 
-type _SeverityCheck = InsightSeverity extends 'info' | 'positive' | 'concern' ? true : never;
-type _InsightHasRequiredFields = keyof Insight extends
-  | 'id'
-  | 'severity'
-  | 'title'
-  | 'detail'
-  | 'value'
-  | 'unit'
-  | 'range'
-  ? true
-  : never;
-type _InsightInputHasSessions = InsightInput extends { sessions: ReadonlyArray<unknown> }
-  ? true
-  : never;
+// Verify InsightSeverity covers exactly the three expected literals.
+const _severityCheck: InsightSeverity extends 'info' | 'positive' | 'concern' ? true : never = true;
+void _severityCheck;
+// Verify required fields are present on Insight (presence check, not "no-extra-keys")
+const _insightCheck: 'id' | 'severity' | 'title' | 'detail' extends keyof Insight ? true : never = true;
+void _insightCheck;
+// Verify InsightInput has a sessions array.
+const _inputCheck: InsightInput extends { sessions: ReadonlyArray<unknown> } ? true : never = true;
+void _inputCheck;
