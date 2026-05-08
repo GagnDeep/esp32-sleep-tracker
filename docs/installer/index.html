@@ -299,6 +299,53 @@
       </li>
     </ol>
 
+    <h2>Troubleshooting</h2>
+    <details class="card" style="padding: 16px 20px;">
+      <summary style="cursor:pointer; font-weight:600; color:var(--ink);">"Invalid head of packet (0xff): Possible serial noise or corruption"</summary>
+      <p style="margin-top: 12px;">
+        This means the chip didn't enter download mode — usually the
+        auto-reset transistor on the dev board didn't fire reliably, so
+        the existing firmware kept running while the installer tried to
+        talk to the ROM bootloader. Almost always a CP2102/CH340 + classic
+        ESP32 quirk; rare on ESP32-C3 native USB.
+      </p>
+      <p><strong>Fix:</strong></p>
+      <ol style="margin: 0 0 8px 18px; padding: 0; color: var(--ink);">
+        <li><strong>Press and hold the <code>BOOT</code> (or <code>IO0</code>) button</strong> on the dev board.</li>
+        <li>While holding it, click <em>Connect &amp; install</em> and pick the serial port.</li>
+        <li>When the progress bar appears (or after ~3 seconds), release <code>BOOT</code>.</li>
+      </ol>
+      <p style="margin-top: 8px;">
+        If your board only has a <code>RST</code>/<code>EN</code> button:
+        hold <code>BOOT</code>, tap <code>RST</code>, release <code>RST</code>,
+        then keep holding <code>BOOT</code> until the install starts.
+      </p>
+      <p style="font-size: 0.85rem; margin-top: 8px;">
+        Other things that occasionally help: try a different (data-capable, not charge-only) USB cable; switch USB ports; close any other tab or app holding the serial port (<code>pio device monitor</code>, Arduino Serial Monitor, screen, minicom).
+      </p>
+    </details>
+    <details class="card" style="padding: 16px 20px;">
+      <summary style="cursor:pointer; font-weight:600; color:var(--ink);">"No serial port chosen" / port doesn't appear</summary>
+      <p style="margin-top: 12px;">
+        Most likely a missing USB-UART driver. Install the
+        <a href="https://www.silabs.com/developers/usb-to-uart-bridge-vcp-drivers">CP2102/CP2104 driver</a>
+        (Silicon Labs) for boards labelled <em>CP2102 USB to UART Bridge</em>,
+        or the <a href="https://www.wch.cn/downloads/CH341SER_EXE.html">CH340/CH341 driver</a>
+        (WCH) for boards with the <em>QinHeng</em> chip. Reboot after install. ESP32-C3 boards with
+        native USB-JTAG don't need any driver.
+      </p>
+    </details>
+    <details class="card" style="padding: 16px 20px;">
+      <summary style="cursor:pointer; font-weight:600; color:var(--ink);">Flash succeeds but the WiFi setup never appears</summary>
+      <p style="margin-top: 12px;">
+        Stay on the page after the progress bar finishes — the page asks
+        the firmware to start Improv-Serial provisioning, which takes a
+        few seconds while the device boots and the SDK handshakes. If it
+        never appears, refresh and use <em>Configure WiFi only</em> below
+        the install button instead.
+      </p>
+    </details>
+
     <h2>Wiring (one sensor, four wires)</h2>
     <p style="font-size: 0.9rem;">
       Pin numbers depend on which chip you flashed. Both share the same
