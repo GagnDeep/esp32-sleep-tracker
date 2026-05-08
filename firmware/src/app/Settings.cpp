@@ -54,6 +54,7 @@ String Settings::toJsonNoCrc() const {
   d["baseline_nights"]   = baselineNights;
   d["user_baseline_rmssd"] = userBaselineRmssd;
   d["pin"]               = pin;
+  d["coherence_test_signal"] = coherenceTestSignal;
   String out; serializeJson(d, out);
   return out;
 }
@@ -78,6 +79,7 @@ String Settings::toJson(uint32_t crc) const {
   d["baseline_nights"]   = baselineNights;
   d["user_baseline_rmssd"] = userBaselineRmssd;
   d["pin"]               = pin;
+  d["coherence_test_signal"] = coherenceTestSignal;
   d["crc"]               = crc;
   String out; serializeJson(d, out);
   return out;
@@ -117,6 +119,8 @@ bool Settings::fromJson(const String& json) {
   baselineNights = d["baseline_nights"] | baselineNights;
   userBaselineRmssd = d["user_baseline_rmssd"] | userBaselineRmssd;
   pin            = d["pin"]             | pin;
+  coherenceTestSignal = d["coherence_test_signal"] | coherenceTestSignal;
+  if (coherenceTestSignal > 3) coherenceTestSignal = 0;
   return true;
 }
 

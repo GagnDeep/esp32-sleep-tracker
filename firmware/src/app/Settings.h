@@ -41,6 +41,12 @@ class Settings {
   // Optional 4-digit PIN for mutating endpoints (empty = open).
   String   pin            = "";
 
+  // HRV coherence test signal selector. 0=real (sensor), 1=A (0.10 Hz
+  // sinusoid), 2=B (white noise), 3=C (0.25 Hz sinusoid). Honored only
+  // when firmware is built with -DCOHERENCE_TEST_MODE=1; otherwise it
+  // is persisted but inert. Apply requires reboot.
+  uint8_t  coherenceTestSignal = 0;
+
   // ---- IO --------------------------------------------------------------
   bool load();
   bool save();           // immediate (atomic: tmp + rename, with .bak)

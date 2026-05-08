@@ -2,6 +2,9 @@
 #include "CoherenceFft.h"
 #include "IbiQualityFilter.h"
 #include "IbiResampler.h"
+#if COHERENCE_TEST_MODE
+#include "CoherenceTestSignals.h"
+#endif
 #include "config.h"
 #include "../util/Log.h"
 #include <Arduino.h>
@@ -90,9 +93,12 @@ void begin() {
            coherence_fft::binWidthHz((float)cfg::COHERENCE_FS_HZ));
 }
 
-void pushIbi(uint32_t t_ms, uint16_t rrMs) {
-  ++totalSeen_;
-  if (!filter_.accept(rrMs)) return;
+namespace {
+// Append into the SPSC ring without going through the quality filter.
+// Used by both the real-beat path (after the filter passes) and the
+// synthetic test path (which bypasses the filter so test-B's white
+// noise isn't half-rejected).
+void appendIbi_(uint32_t t_ms, uint16_t rrMs) {
   const uint32_t seq = writeSeq_.load(std::memory_order_relaxed);
   IbiSample& slot = ibiBuf_[seq % IBI_RING_CAP];
   slot.t_ms  = t_ms;
@@ -101,6 +107,27 @@ void pushIbi(uint32_t t_ms, uint16_t rrMs) {
   // to that count — making this store the synchronisation point.
   writeSeq_.store(seq + 1, std::memory_order_release);
 }
+}  // namespace
+
+void pushIbi(uint32_t t_ms, uint16_t rrMs) {
+#if COHERENCE_TEST_MODE
+  // When a synthetic generator is driving the pipeline, the real
+  // sensor's beats are dropped — the test signal owns the ring.
+  if (coherence_test::signal() != coherence_test::SIG_REAL) return;
+#endif
+  ++totalSeen_;
+  if (!filter_.accept(rrMs)) return;
+  appendIbi_(t_ms, rrMs);
+}
+
+#if COHERENCE_TEST_MODE
+// Visible only when COHERENCE_TEST_MODE=1. Exposed via a forward
+// declaration in CoherenceTestSignals.cpp; not part of the public API.
+void injectTestIbi(uint32_t t_ms, uint16_t rrMs) {
+  ++totalSeen_;
+  appendIbi_(t_ms, rrMs);
+}
+#endif
 
 void tickIfDue() {
   const uint32_t now = millis();

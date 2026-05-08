@@ -18,6 +18,9 @@
 #include "app/SleepStager.h"
 #include "app/AlarmController.h"
 #include "dsp/Coherence.h"
+#if COHERENCE_TEST_MODE
+#include "dsp/CoherenceTestSignals.h"
+#endif
 
 #include "net/WifiProvisioner.h"
 #include "net/WebServer.h"
@@ -77,6 +80,9 @@ static void coherenceTask(void* /*arg*/) {
   // seconds; this loop just wakes often enough to keep the gate
   // responsive and to feed the WDT. 500 ms is well under the 10 s WDT.
   for (;;) {
+#if COHERENCE_TEST_MODE
+    coherence_test::tick(millis());
+#endif
     coherence::tickIfDue();
     esp_task_wdt_reset();
     vTaskDelay(pdMS_TO_TICKS(500));
@@ -134,6 +140,13 @@ void setup() {
   coherence::setPublisher([](const coherence::Snapshot& s) {
     ws_broadcaster::broadcastCoherence(s);
   });
+#if COHERENCE_TEST_MODE
+  coherence_test::setSignal(settings.coherenceTestSignal);
+  if (settings.coherenceTestSignal != 0) {
+    LOG_WARN(TAG, "COHERENCE_TEST_MODE active: synthetic signal=%u",
+             (unsigned)settings.coherenceTestSignal);
+  }
+#endif
 
   if (!wifi::begin(settings.deviceName)) {
     // begin() reboots on failure; we won't get here.
