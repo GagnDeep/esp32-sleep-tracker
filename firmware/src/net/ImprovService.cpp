@@ -23,6 +23,18 @@
 namespace {
 constexpr const char* TAG = "improv";
 
+// Improv side-channel debug dump. On the ESP32-C3 we run Serial over USB-CDC
+// (the Improv channel) and Serial0 maps to UART0 GPIO20/21 — perfect for
+// out-of-band diagnostics that don't corrupt Improv frames. The classic
+// ESP32 has no native USB so Serial *is* UART0; there is no separate channel
+// available, and writing diagnostic text would only corrupt Improv. Compile
+// these prints out on non-C3 targets.
+#if defined(CONFIG_IDF_TARGET_ESP32C3) && defined(ARDUINO_USB_CDC_ON_BOOT)
+  #define IMPROV_DBG(fmt, ...) Serial0.printf(fmt, ##__VA_ARGS__)
+#else
+  #define IMPROV_DBG(fmt, ...) ((void)0)
+#endif
+
 constexpr uint8_t TYPE_CURRENT_STATE = 0x01;
 constexpr uint8_t TYPE_ERROR_STATE   = 0x02;
 constexpr uint8_t TYPE_RPC           = 0x03;
@@ -151,7 +163,7 @@ bool tryConnect(const char* ssid, const char* pass, uint32_t timeoutMs) {
   esp_wifi_set_storage(WIFI_STORAGE_FLASH);  // persist creds to NVS
   esp_wifi_set_mode(WIFI_MODE_STA);
   esp_wifi_set_config(WIFI_IF_STA, &wcfg);
-  Serial0.printf("[improv] connect ssid=%s ch=%d pmf=off\n", ssid, channel);
+  IMPROV_DBG("[improv] connect ssid=%s ch=%d pmf=off\n", ssid, channel);
   esp_wifi_start();
   esp_wifi_connect();
 
@@ -167,7 +179,7 @@ bool tryConnect(const char* ssid, const char* pass, uint32_t timeoutMs) {
       lastStatus = (uint8_t)st;
       // Echo to UART0 (silent on USB-CDC) so a UART adapter — if any —
       // can show real-time status without poisoning Improv.
-      Serial0.printf("[improv] wifi status=%u\n", (unsigned)st);
+      IMPROV_DBG("[improv] wifi status=%u\n", (unsigned)st);
     }
     delay(100);
   }
@@ -230,8 +242,8 @@ void handleRpc(const uint8_t* p, uint8_t len) {
       // serial adapter (or a UART pin scope) can verify what arrived
       // off the wire without polluting the USB-CDC Improv channel.
       // Password length only — never the password itself.
-      Serial0.printf("[improv] WIFI_SETTINGS ssid='%s' (%u bytes) pass=%u bytes\n",
-                     ssid, (unsigned)ssidLen, (unsigned)passLen);
+      IMPROV_DBG("[improv] WIFI_SETTINGS ssid='%s' (%u bytes) pass=%u bytes\n",
+                 ssid, (unsigned)ssidLen, (unsigned)passLen);
 
       sendCurrentState(STATE_PROVISIONING);
       // Persist creds to NVS so subsequent boots autoconnect. We also

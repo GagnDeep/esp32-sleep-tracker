@@ -48,6 +48,28 @@ bool begin(const String& deviceName) {
   wm.setBreakAfterConfig(true);
   wm.setHostname(cfg::MDNS_HOSTNAME);
 
+#if defined(WIFI_PRESET_SSID) && defined(WIFI_PRESET_PASS)
+  // Build-time credential override (set via PLATFORMIO_BUILD_FLAGS). Useful
+  // for dev flashing without going through the captive portal. Persists to
+  // NVS via the default WiFi.persistent(true), so subsequent boots reconnect
+  // through wm.autoConnect()'s saved-credentials path and skip this block.
+  if (WiFi.status() != WL_CONNECTED) {
+    LOG_INFO(TAG, "preset creds present — direct connect to ssid=%s", WIFI_PRESET_SSID);
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(WIFI_PRESET_SSID, WIFI_PRESET_PASS);
+    const uint32_t deadline = millis() + 15000;
+    while (WiFi.status() != WL_CONNECTED && millis() < deadline) {
+      delay(200);
+    }
+    if (WiFi.status() == WL_CONNECTED) {
+      LOG_INFO(TAG, "connected via preset: ssid=%s ip=%s rssi=%d",
+               WiFi.SSID().c_str(), WiFi.localIP().toString().c_str(), WiFi.RSSI());
+      return true;
+    }
+    LOG_WARN(TAG, "preset connect timed out — falling back to portal");
+  }
+#endif
+
   const String ap = apSsid(deviceName);
   LOG_INFO(TAG, "starting (AP fallback=%s)", ap.c_str());
   if (!wm.autoConnect(ap.c_str())) {
