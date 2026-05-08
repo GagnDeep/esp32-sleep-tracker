@@ -1,6 +1,6 @@
 {
   "name": "Sleep Tracker",
-  "version": "0.2.1-dev",
+  "version": "0.2.2-dev",
   "new_install_prompt_erase": true,
   "builds": [
     {

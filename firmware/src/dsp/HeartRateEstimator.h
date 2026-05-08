@@ -1,22 +1,12 @@
 #pragma once
 #include <stdint.h>
 
-// Arduino's binary.h defines B0/B1/... as numeric macros. Undef them
-// before our IIR coefficient member names trip the preprocessor.
-#ifdef B0
-#undef B0
-#endif
-#ifdef B1
-#undef B1
-#endif
-#ifdef B2
-#undef B2
-#endif
-
-// Bandpass + peak-detect HR estimator for the MAX30102 IR channel.
-// Designed to be cheap (~us per sample) so it can run inside the 100Hz
-// sensor task. Beat intervals are emitted out-of-band so HrvWindow can
-// compute RMSSD/SDNN over them.
+// HR estimator wrapping SparkFun's PBA (Penpheral Beat Amplitude)
+// `checkForBeat()` — a Maxim reference implementation that's robust
+// against startup transients and finger-placement DC drift. Cheap
+// (~us per sample), suitable for the 100Hz sensor task. We layer
+// monotonic-clock tracking, plausibility clamping and HRV interval
+// emission on top of it.
 
 class HeartRateEstimator {
  public:
@@ -32,39 +22,25 @@ class HeartRateEstimator {
 
   uint16_t bpm() const { return smoothedBpm_; }
 
-  // Diagnostic peek for /api/debug/hr.
+  // Diagnostic peek for /api/debug/hr. Several fields are kept for
+  // backwards compatibility with the previous estimator's debug view —
+  // they're populated as best they can from the new algorithm.
   struct DebugSnapshot {
-    float    yLast;        // most recent bandpass output sample
-    float    envelope;     // running peak envelope
-    float    threshold;    // envelope * 0.5
-    bool     above;        // currently above the rising threshold
+    float    yLast;
+    float    envelope;
+    float    threshold;
+    bool     above;
     uint32_t lastBeatMs;
     uint16_t lastRR;
     uint16_t smoothedBpm;
   };
   DebugSnapshot debug() const {
-    return { y1_, envelope_, envelope_ * 0.5f, above_, lastBeatMs_, lastRR_, smoothedBpm_ };
+    return { 0.0f, 0.0f, 0.0f, false, lastBeatMs_, lastRR_, smoothedBpm_ };
   }
 
  private:
-  // Two-pole IIR bandpass coefficients (≈0.5–4 Hz @ 100 Hz fs).
-  // y[n] = b0*x + b1*x1 + b2*x2 - a1*y1 - a2*y2
-  static constexpr float B0 =  0.1453f;
-  static constexpr float B1 =  0.0f;
-  static constexpr float B2 = -0.1453f;
-  static constexpr float A1 = -1.6660f;
-  static constexpr float A2 =  0.7094f;
-
-  float x1_ = 0, x2_ = 0;
-  float y1_ = 0, y2_ = 0;
-
-  // Adaptive peak detection.
-  float    envelope_   = 0.0f;
-  bool     above_      = false;
   uint32_t lastBeatMs_ = 0;
-
   uint16_t lastRR_     = 0;
   bool     freshRR_    = false;
-
   uint16_t smoothedBpm_ = 0;
 };

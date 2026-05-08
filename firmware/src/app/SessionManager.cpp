@@ -27,6 +27,17 @@ void SessionManager::sensorTick() {
   Max30102Sensor::Reading r;
   if (sensors_->max().get(r)) {
     if (r.finger) {
+      // If the finger has been gone long enough that we already blanked
+      // the live values (or this is the first read after boot), the
+      // previous HR/SpO2 filter state is stale — clear it so the new
+      // engagement primes from this sample's DC level rather than
+      // ringing on a step from the old state.
+      constexpr uint32_t REENGAGE_RESET_MS = 3000;
+      if (lastFingerOnMs_ == 0 ||
+          (r.t_ms - lastFingerOnMs_) > REENGAGE_RESET_MS) {
+        hr_.reset();
+        spo2_.reset();
+      }
       const uint16_t bpm = hr_.push(r.t_ms, (int32_t)r.ir);
       liveHr_ = bpm;
       uint16_t rr;
