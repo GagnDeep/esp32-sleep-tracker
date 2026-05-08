@@ -1,4 +1,5 @@
 #include "Coherence.h"
+#include "CoherenceFft.h"
 #include "IbiQualityFilter.h"
 #include "IbiResampler.h"
 #include "config.h"
@@ -39,8 +40,10 @@ uint32_t          totalSeen_ = 0;
 constexpr size_t  CTRL_MAX = IbiResampler::MAX_PTS;
 float             ctrlT_[CTRL_MAX];
 float             ctrlY_[CTRL_MAX];
-// 4 Hz × 256-sample resampled frame — input to the FFT in stage 4.
+// 4 Hz × 256-sample resampled frame — input to the FFT.
 float             frame_[256];
+// One-sided power spectrum |X[k]|^2 for k=0..128.
+float             power_[129];
 IbiResampler      resampler_;
 
 size_t snapshotIbis_(float* outT, float* outY, size_t maxN) {
@@ -74,10 +77,12 @@ void begin() {
   filter_.reset();
   writeSeq_.store(0, std::memory_order_release);
   totalSeen_ = 0;
-  LOG_INFO(TAG, "begin (window=%us, fs=%uHz, N=%u)",
+  coherence_fft::begin();
+  LOG_INFO(TAG, "begin (window=%us, fs=%uHz, N=%u, bin=%.4fHz)",
            (unsigned)cfg::COHERENCE_WINDOW_S,
            (unsigned)cfg::COHERENCE_FS_HZ,
-           (unsigned)cfg::COHERENCE_FFT_N);
+           (unsigned)cfg::COHERENCE_FFT_N,
+           coherence_fft::binWidthHz((float)cfg::COHERENCE_FS_HZ));
 }
 
 void pushIbi(uint32_t t_ms, uint16_t rrMs) {
@@ -119,40 +124,41 @@ void tickIfDue() {
     }
   }
 
-  // Stage 3 sanity: log filter health + resampler status. Mean / range
-  // of the resampled frame are the cheap sanity check that the spline
-  // produced something physically plausible (mean ~ recent IBI;
-  // range << mean for a normal heartbeat).
   if (resampleOk) {
-    float fMin = frame_[0], fMax = frame_[0], fSum = 0.0f;
-    for (size_t k = 0; k < N; ++k) {
-      const float v = frame_[k];
-      fSum += v;
-      if (v < fMin) fMin = v;
-      if (v > fMax) fMax = v;
+    // Spectral path: window + FFT, then locate the dominant in-band
+    // peak. Stage 5 will turn this into a coherence ratio + score; for
+    // now we just log it as a sanity check.
+    coherence_fft::compute(frame_, power_);
+
+    const float binHz   = coherence_fft::binWidthHz(fs);
+    const size_t binLo  = (size_t)((float)cfg::COHERENCE_BAND_LO_HZ / binHz);
+    const size_t binHiC = (size_t)((float)cfg::COHERENCE_BAND_HI_HZ / binHz);
+    const size_t binHi  = binHiC < (N / 2) ? binHiC : (N / 2);
+
+    size_t peakBin = binLo;
+    float  peakPow = power_[binLo];
+    for (size_t k = binLo + 1; k <= binHi; ++k) {
+      if (power_[k] > peakPow) { peakPow = power_[k]; peakBin = k; }
     }
-    const float fMean = fSum / (float)N;
+    const float peakHz = (float)peakBin * binHz;
     LOG_DEBUG(TAG,
-              "ibi seen=%lu acc=%lu rej=%lu med=%ums | resample ok n=%u "
-              "mean=%.3fs range=%.3fs",
-              (unsigned long)totalSeen_,
+              "ibi acc=%lu rej=%lu | resample n=%u | peak f=%.3fHz "
+              "(bin %u) p=%.4g",
               (unsigned long)filter_.totalAccepted(),
               (unsigned long)filter_.totalRejected(),
-              (unsigned)filter_.medianMs(),
-              (unsigned)n, fMean, (fMax - fMin));
+              (unsigned)n, peakHz, (unsigned)peakBin, peakPow);
+    latest_.dominantHz = peakHz;
   } else {
     LOG_DEBUG(TAG,
-              "ibi seen=%lu acc=%lu rej=%lu med=%ums | resample skip "
-              "n=%u span=%.1f/%.0fs",
-              (unsigned long)totalSeen_,
+              "ibi acc=%lu rej=%lu | resample skip n=%u span=%.1f/%.0fs",
               (unsigned long)filter_.totalAccepted(),
               (unsigned long)filter_.totalRejected(),
-              (unsigned)filter_.medianMs(),
               (unsigned)n, availSpanS, windowS);
   }
 
   latest_.sessionSec = (now - pipelineStartMs_) / 1000u;
   latest_.updatedMs  = now;
+  (void)lastDebugLogMs_;
 }
 
 const Snapshot& latest() { return latest_; }
