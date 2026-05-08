@@ -60,6 +60,18 @@ void broadcastSample(const Sample& s) {
   if (n > 0) sendOrDrop(buf, (size_t)n);
 }
 
+void broadcastCoherence(const coherence::Snapshot& s) {
+  if (!s_ws || s_ws->count() == 0) return;
+  // 192-byte buffer per the plan. Real frames land at ~110 bytes.
+  char buf[192];
+  const int n = snprintf(buf, sizeof(buf),
+    "{\"type\":\"coherence\",\"ratio\":%.3f,\"score\":%u,\"level\":%u,"
+    "\"ach\":%u,\"f0\":%.3f,\"sec\":%u}",
+    s.ratio, (unsigned)s.score, (unsigned)s.level,
+    (unsigned)s.achievement, s.dominantHz, (unsigned)s.sessionSec);
+  if (n > 0) sendOrDrop(buf, (size_t)n);
+}
+
 void broadcastStage(uint8_t stage) {
   if (!s_ws || s_ws->count() == 0) return;
   char buf[64];

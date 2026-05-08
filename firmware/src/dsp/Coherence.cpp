@@ -21,9 +21,12 @@ namespace {
 constexpr const char* TAG = "coherence";
 
 Snapshot          latest_{};
+float             latestPeakPow_  = 0.0f;
+float             latestTotalPow_ = 0.0f;
 uint32_t          lastUpdateMs_    = 0;
 uint32_t          pipelineStartMs_ = 0;
 uint32_t          lastDebugLogMs_  = 0;
+PublishFn         publisher_       = nullptr;
 
 IbiQualityFilter  filter_;
 
@@ -71,9 +74,11 @@ size_t snapshotIbis_(float* outT, float* outY, size_t maxN) {
 
 void begin() {
   latest_ = Snapshot{};
-  lastUpdateMs_     = 0;
-  lastDebugLogMs_   = 0;
-  pipelineStartMs_  = millis();
+  latestPeakPow_   = 0.0f;
+  latestTotalPow_  = 0.0f;
+  lastUpdateMs_    = 0;
+  lastDebugLogMs_  = 0;
+  pipelineStartMs_ = millis();
   filter_.reset();
   writeSeq_.store(0, std::memory_order_release);
   totalSeen_ = 0;
@@ -199,6 +204,8 @@ void tickIfDue() {
     latest_.level       = level;
     latest_.dominantHz  = peakHz;
     latest_.achievement = (uint16_t)ach;
+    latestPeakPow_      = peakSum;
+    latestTotalPow_     = totalSum;
   } else {
     LOG_DEBUG(TAG,
               "ibi acc=%lu rej=%lu | resample skip n=%u span=%.1f/%.0fs",
@@ -210,8 +217,40 @@ void tickIfDue() {
   latest_.sessionSec = (now - pipelineStartMs_) / 1000u;
   latest_.updatedMs  = now;
   (void)lastDebugLogMs_;
+
+  // Fire the optional publisher (wired to ws_broadcaster from main.cpp).
+  // Called even when resampling skipped — clients still get a heartbeat
+  // showing the pipeline is alive and which sessionSec we're at.
+  if (publisher_) publisher_(latest_);
 }
 
 const Snapshot& latest() { return latest_; }
+
+DebugSnapshot debug() {
+  DebugSnapshot d{};
+  d.snap          = latest_;
+  d.peakPower     = latestPeakPow_;
+  d.totalPower    = latestTotalPow_;
+  d.totalSeen     = totalSeen_;
+  d.totalAccepted = filter_.totalAccepted();
+  d.totalRejected = filter_.totalRejected();
+  d.medianMs      = filter_.medianMs();
+
+  // Last 8 IBIs from the SPSC ring, oldest first. See snapshotIbis_ in
+  // the anonymous namespace for the writer/reader race semantics.
+  const uint32_t seq = writeSeq_.load(std::memory_order_acquire);
+  const size_t total = seq < (uint32_t)IBI_RING_CAP ? (size_t)seq
+                                                   : (size_t)IBI_RING_CAP;
+  const size_t take = total < 8 ? total : 8;
+  d.lastIbisN = (uint8_t)take;
+  for (size_t k = 0; k < take; ++k) {
+    const size_t idx = (size_t)((seq - (uint32_t)take + (uint32_t)k)
+                                % (uint32_t)IBI_RING_CAP);
+    d.lastIbisMs[k] = (uint16_t)(ibiBuf_[idx].ibi_s * 1000.0f);
+  }
+  return d;
+}
+
+void setPublisher(PublishFn fn) { publisher_ = fn; }
 
 }  // namespace coherence

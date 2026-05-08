@@ -2,6 +2,7 @@
 #include <ESPAsyncWebServer.h>
 #include <stdint.h>
 #include "../storage/Sample.h"
+#include "../dsp/Coherence.h"
 
 namespace ws_broadcaster {
 
@@ -9,6 +10,10 @@ void attach(AsyncWebSocket* ws);
 
 // Hot-path: called every 1Hz from the pipeline. Cheap if no clients.
 void broadcastSample(const Sample& s);
+
+// Coherence snapshot. Fired every cfg::COHERENCE_UPDATE_S (5 s) by the
+// dsp coherence task via its publisher hook.
+void broadcastCoherence(const coherence::Snapshot& s);
 
 // Manual broadcasts (called when state changes happen out of band).
 void broadcastStage(uint8_t stage);

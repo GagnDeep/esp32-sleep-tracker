@@ -5,6 +5,7 @@
 #include "../app/SessionManager.h"
 #include "../app/Settings.h"
 #include "../app/AlarmController.h"
+#include "../dsp/Coherence.h"
 #include "../sensors/SensorRegistry.h"
 #include "../storage/SessionStore.h"
 #include "../storage/Sample.h"
@@ -266,6 +267,17 @@ void registerRoutes(AsyncWebServer& s) {
     d["calibration_nights_done"] = settings.baselineNights;
     d["ws_drops"]         = ws_broadcaster::dropCount();
     d["pin_required"]     = settings.pin.length() > 0;
+    {
+      const auto& c = coherence::latest();
+      auto co = d["coherence"].to<JsonObject>();
+      co["enabled"] = cfg::COHERENCE_ENABLED;
+      co["ratio"]   = c.ratio;
+      co["score"]   = c.score;
+      co["level"]   = c.level;
+      co["ach"]     = c.achievement;
+      co["f0"]      = c.dominantHz;
+      co["sec"]     = c.sessionSec;
+    }
     String out; serializeJson(d, out);
     sendJson(req, 200, out);
   });
@@ -635,6 +647,41 @@ void registerRoutes(AsyncWebServer& s) {
     d["age_ms"]       = snap.lastBeatMs ? (uint32_t)(millis() - snap.lastBeatMs) : 0;
     d["live_hr"]      = sessionManager.hr();
     d["live_flags"]   = sessionManager.flags();
+    String out; serializeJson(d, out);
+    sendJson(req, 200, out);
+  });
+
+  // ---- /api/debug/coherence -------------------------------------------
+  // Spectral diagnostics for the HRV coherence pipeline. Mirrors the
+  // shape of /api/debug/hr — exposes the broadband + peak power, the
+  // dominant frequency, the score/classification, and the most recent
+  // 8 IBIs feeding the spline. Last-IBIs and filter counters are sourced
+  // live from the sensor task; spectral fields reflect the most recent
+  // 5 s tick.
+  s.on("/api/debug/coherence", HTTP_GET, [](AsyncWebServerRequest* req) {
+    JsonDocument d;
+    auto dbg = coherence::debug();
+    d["enabled"]         = cfg::COHERENCE_ENABLED;
+    d["window_s"]        = cfg::COHERENCE_WINDOW_S;
+    d["fs_hz"]           = cfg::COHERENCE_FS_HZ;
+    d["fft_n"]           = cfg::COHERENCE_FFT_N;
+    d["update_s"]        = cfg::COHERENCE_UPDATE_S;
+    d["ratio"]           = dbg.snap.ratio;
+    d["score"]           = dbg.snap.score;
+    d["level"]           = dbg.snap.level;
+    d["achievement"]     = dbg.snap.achievement;
+    d["dominant_freq"]   = dbg.snap.dominantHz;
+    d["peak_power"]      = dbg.peakPower;
+    d["total_power"]     = dbg.totalPower;
+    d["session_sec"]     = dbg.snap.sessionSec;
+    d["updated_age_ms"]  = dbg.snap.updatedMs
+                            ? (uint32_t)(millis() - dbg.snap.updatedMs) : 0;
+    d["ibi_seen"]        = dbg.totalSeen;
+    d["ibi_accepted"]    = dbg.totalAccepted;
+    d["ibi_rejected"]    = dbg.totalRejected;
+    d["ibi_median_ms"]   = dbg.medianMs;
+    JsonArray arr = d["last_ibis_ms"].to<JsonArray>();
+    for (uint8_t i = 0; i < dbg.lastIbisN; ++i) arr.add(dbg.lastIbisMs[i]);
     String out; serializeJson(d, out);
     sendJson(req, 200, out);
   });

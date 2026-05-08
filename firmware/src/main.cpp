@@ -131,6 +131,9 @@ void setup() {
   alarmController.begin(&sessionManager);
   sessionManager.setStager(&sleepStager);
   coherence::begin();
+  coherence::setPublisher([](const coherence::Snapshot& s) {
+    ws_broadcaster::broadcastCoherence(s);
+  });
 
   if (!wifi::begin(settings.deviceName)) {
     // begin() reboots on failure; we won't get here.

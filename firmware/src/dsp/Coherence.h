@@ -57,4 +57,25 @@ void tickIfDue();
 // frame — both are valid).
 const Snapshot& latest();
 
+// Richer diagnostic view used by /api/debug/coherence: spectral powers,
+// filter counters, and the most recent IBIs. Computed on demand.
+struct DebugSnapshot {
+  Snapshot  snap;
+  float     peakPower    = 0.0f;
+  float     totalPower   = 0.0f;
+  uint32_t  totalSeen    = 0;
+  uint32_t  totalAccepted = 0;
+  uint32_t  totalRejected = 0;
+  uint16_t  medianMs     = 0;
+  uint8_t   lastIbisN    = 0;       // 0..8
+  uint16_t  lastIbisMs[8] = {0};    // oldest first
+};
+DebugSnapshot debug();
+
+// Optional publisher hook fired right after each successful tick. Wired
+// to ws_broadcaster::broadcastCoherence from main.cpp; keeps the dsp
+// module free of net/ dependencies.
+using PublishFn = void (*)(const Snapshot& s);
+void setPublisher(PublishFn fn);
+
 }  // namespace coherence
