@@ -215,7 +215,7 @@
 </head>
 <body>
   <main>
-    <span class="tag">v0.2.0-dev · ESP32 + ESP32-C3</span>
+    <span class="tag">v0.2.1-dev · ESP32 + ESP32-C3</span>
     <h1>Sleep Tracker installer</h1>
     <p class="lede">
       Flash the firmware, hand over your WiFi, and land on the device's
@@ -372,12 +372,14 @@
 
     <h2>What's in the firmware</h2>
     <div class="grid">
-      <div class="feat"><strong>Live SpO₂ + HR</strong><span>1 Hz aggregated samples streamed over WebSocket.</span></div>
+      <div class="feat"><strong>Live SpO₂ + HR</strong><span>1 Hz aggregated samples streamed over WebSocket. Steady reading even when the finger micro-shifts on the sensor.</span></div>
       <div class="feat"><strong>Sleep stager</strong><span>Awake / Light / Deep heuristic from HRV + motion.</span></div>
       <div class="feat"><strong>Smart alarm</strong><span>Wakes you in light sleep within a window.</span></div>
       <div class="feat"><strong>OTA + rollback</strong><span>Firmware updates from the SPA, auto-rollback on failure.</span></div>
       <div class="feat"><strong>Crash recovery</strong><span>Lost-power sessions are recovered on next boot.</span></div>
       <div class="feat"><strong>PIN auth (optional)</strong><span>Lock mutating endpoints behind a 4-digit PIN.</span></div>
+      <div class="feat"><strong>Resilient sensor init</strong><span>Auto-retries MAX30102 / MPU6050 begin every 5 s, so a sensor wired up after boot just starts working.</span></div>
+      <div class="feat"><strong>Diagnostic API</strong><span><code>/api/debug/i2c-scan</code>, <code>/api/debug/sensor-raw</code>, <code>/api/debug/hr</code> for fast triage.</span></div>
     </div>
 
     <footer>
