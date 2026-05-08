@@ -32,6 +32,20 @@ class HeartRateEstimator {
 
   uint16_t bpm() const { return smoothedBpm_; }
 
+  // Diagnostic peek for /api/debug/hr.
+  struct DebugSnapshot {
+    float    yLast;        // most recent bandpass output sample
+    float    envelope;     // running peak envelope
+    float    threshold;    // envelope * 0.5
+    bool     above;        // currently above the rising threshold
+    uint32_t lastBeatMs;
+    uint16_t lastRR;
+    uint16_t smoothedBpm;
+  };
+  DebugSnapshot debug() const {
+    return { y1_, envelope_, envelope_ * 0.5f, above_, lastBeatMs_, lastRR_, smoothedBpm_ };
+  }
+
  private:
   // Two-pole IIR bandpass coefficients (≈0.5–4 Hz @ 100 Hz fs).
   // y[n] = b0*x + b1*x1 + b2*x2 - a1*y1 - a2*y2

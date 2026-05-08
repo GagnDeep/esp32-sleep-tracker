@@ -618,6 +618,27 @@ void registerRoutes(AsyncWebServer& s) {
     wifi::resetAndReboot();
   });
 
+  // ---- /api/debug/hr --------------------------------------------------
+  // HR estimator internal state — used to figure out whether the
+  // bandpass filter is producing modulation, whether the peak detector
+  // is firing, and how recent the last detected beat was.
+  s.on("/api/debug/hr", HTTP_GET, [](AsyncWebServerRequest* req) {
+    JsonDocument d;
+    auto snap = sessionManager.hrEstimator().debug();
+    d["y_last"]       = snap.yLast;
+    d["envelope"]     = snap.envelope;
+    d["threshold"]    = snap.threshold;
+    d["above"]        = snap.above;
+    d["last_beat_ms"] = snap.lastBeatMs;
+    d["last_rr"]      = snap.lastRR;
+    d["smoothed_bpm"] = snap.smoothedBpm;
+    d["age_ms"]       = snap.lastBeatMs ? (uint32_t)(millis() - snap.lastBeatMs) : 0;
+    d["live_hr"]      = sessionManager.hr();
+    d["live_flags"]   = sessionManager.flags();
+    String out; serializeJson(d, out);
+    sendJson(req, 200, out);
+  });
+
   // ---- /api/debug/sensor-raw ------------------------------------------
   // Latest raw IR / Red counts from the MAX30102 plus the finger-detect
   // threshold. Lets a user verify the LEDs are firing and reflecting off

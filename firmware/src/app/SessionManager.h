@@ -47,6 +47,7 @@ class SessionManager {
   void setStager(SleepStager* s) { stager_ = s; }
 
   HrvWindow& hrv() { return hrv_; }
+  const HeartRateEstimator& hrEstimator() const { return hr_; }
 
  private:
   SensorRegistry* sensors_ = nullptr;
@@ -65,6 +66,12 @@ class SessionManager {
   // Live state.
   volatile uint16_t liveHr_   = 0;
   volatile uint16_t liveSpo2_ = 0xFFFF;
+  // Wall-clock of the last sample that had finger=true. Used to suppress
+  // the visual flicker that occurs when a finger micro-shifts on the
+  // sensor: we keep the last HR/SpO2 values visible for a short grace
+  // period after a finger-off event, only resetting to "no reading" if
+  // the finger stays off long enough to actually be gone.
+  uint32_t lastFingerOnMs_ = 0;
   volatile uint16_t liveAct_  = 0;
   volatile uint8_t  liveStage_= 0;
   volatile uint8_t  liveFlags_ = 0;

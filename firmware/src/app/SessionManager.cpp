@@ -37,9 +37,20 @@ void SessionManager::sensorTick() {
       const uint16_t s = spo2_.push(r.ir, r.red);
       liveSpo2_ = s;
       liveFlags_ = (uint8_t)(liveFlags_ & ~SampleFlag::FINGER_OFF);
+      lastFingerOnMs_ = r.t_ms;
     } else {
-      liveHr_   = 0;
-      liveSpo2_ = 0xFFFF;
+      // Brief finger-off events are common when the user shifts their
+      // finger on the sensor — without this hysteresis the dashboard
+      // would flash "—" every few seconds even with a steady reading.
+      // Only zero the live values once the finger has been gone for
+      // long enough to plausibly be a real removal.
+      constexpr uint32_t FINGER_GRACE_MS = 3000;
+      const bool reallyGone = lastFingerOnMs_ == 0 ||
+                              (r.t_ms - lastFingerOnMs_) > FINGER_GRACE_MS;
+      if (reallyGone) {
+        liveHr_   = 0;
+        liveSpo2_ = 0xFFFF;
+      }
       liveFlags_ |= SampleFlag::FINGER_OFF;
     }
   }
