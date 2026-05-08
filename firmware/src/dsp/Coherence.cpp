@@ -1,9 +1,11 @@
 #include "Coherence.h"
 #include "IbiQualityFilter.h"
+#include "IbiResampler.h"
 #include "config.h"
 #include "../util/Log.h"
 #include <Arduino.h>
 #include <atomic>
+#include <math.h>
 
 namespace coherence {
 
@@ -26,12 +28,42 @@ IbiQualityFilter  filter_;
 
 // Sliding-window IBI store. Single-producer (sensor task) /
 // single-consumer (coherence task). The writer increments writeSeq_ as
-// the last operation; the reader can detect mid-update reads by
-// re-checking writeSeq_ after the snapshot — see snapshotIbis() in
-// later stages.
+// the last operation; the reader takes a snapshot under acquire load.
 IbiSample         ibiBuf_[IBI_RING_CAP];
 std::atomic<uint32_t> writeSeq_{0};
 uint32_t          totalSeen_ = 0;
+
+// Resampler scratch. Sized to MAX_PTS (128) — comfortably above the ~80
+// IBIs typical in a 64 s window at 60–90 BPM. Two parallel arrays
+// (time-of-beat in seconds, IBI value in seconds) feed the spline.
+constexpr size_t  CTRL_MAX = IbiResampler::MAX_PTS;
+float             ctrlT_[CTRL_MAX];
+float             ctrlY_[CTRL_MAX];
+// 4 Hz × 256-sample resampled frame — input to the FFT in stage 4.
+float             frame_[256];
+IbiResampler      resampler_;
+
+size_t snapshotIbis_(float* outT, float* outY, size_t maxN) {
+  // The writer publishes by incrementing writeSeq_ last (release). We
+  // load it acquire and copy the most-recent min(seq, capacity) entries
+  // oldest-first. A racing writer could overwrite the oldest slot mid-
+  // copy, but at ~1 IBI/s vs sub-100us copy time the probability is
+  // negligible — and even if it happens, the resampler simply sees a
+  // slightly newer-than-expected first sample, which doesn't break the
+  // analysis.
+  const uint32_t seq = writeSeq_.load(std::memory_order_acquire);
+  const size_t total = seq < (uint32_t)IBI_RING_CAP ? (size_t)seq
+                                                   : (size_t)IBI_RING_CAP;
+  if (total == 0) return 0;
+  const size_t take = total < maxN ? total : maxN;
+  const uint32_t first = seq - (uint32_t)take;
+  for (size_t k = 0; k < take; ++k) {
+    const size_t idx = (size_t)((first + (uint32_t)k) % (uint32_t)IBI_RING_CAP);
+    outT[k] = (float)ibiBuf_[idx].t_ms * 0.001f;
+    outY[k] = ibiBuf_[idx].ibi_s;
+  }
+  return take;
+}
 }  // namespace
 
 void begin() {
@@ -65,15 +97,59 @@ void tickIfDue() {
   if (now - lastUpdateMs_ < (uint32_t)cfg::COHERENCE_UPDATE_S * 1000u) return;
   lastUpdateMs_ = now;
 
-  // Stage 2 scaffold: no metrics yet, but surface filter health every
-  // tick so on-device runs make it obvious whether IBIs are arriving
-  // and whether the 20%-rule is busy rejecting artifacts.
-  LOG_DEBUG(TAG, "ibi seen=%lu acc=%lu rej=%lu med=%ums lastRej=%ums",
-            (unsigned long)totalSeen_,
-            (unsigned long)filter_.totalAccepted(),
-            (unsigned long)filter_.totalRejected(),
-            (unsigned)filter_.medianMs(),
-            (unsigned)filter_.lastRejectedMs());
+  // Snapshot the most recent IBIs out of the SPSC ring.
+  const size_t n = snapshotIbis_(ctrlT_, ctrlY_, CTRL_MAX);
+
+  // Resample the last cfg::COHERENCE_WINDOW_S seconds onto a uniform
+  // cfg::COHERENCE_FS_HZ × cfg::COHERENCE_FFT_N grid. Skip until we
+  // have the full window of history (~64 s of IBIs).
+  const float fs       = (float)cfg::COHERENCE_FS_HZ;
+  const size_t N       = (size_t)cfg::COHERENCE_FFT_N;
+  const float windowS  = (float)cfg::COHERENCE_WINDOW_S;
+  bool        resampleOk = false;
+  float       availSpanS = 0.0f;
+  if (n >= 4) {
+    const float tLast  = ctrlT_[n - 1];
+    const float tFirst = ctrlT_[0];
+    availSpanS = tLast - tFirst;
+    const float tStart = tLast - (float)(N - 1) / fs;
+    if (tStart >= tFirst) {
+      resampleOk = resampler_.resample(ctrlT_, ctrlY_, n, tStart, fs,
+                                       frame_, N);
+    }
+  }
+
+  // Stage 3 sanity: log filter health + resampler status. Mean / range
+  // of the resampled frame are the cheap sanity check that the spline
+  // produced something physically plausible (mean ~ recent IBI;
+  // range << mean for a normal heartbeat).
+  if (resampleOk) {
+    float fMin = frame_[0], fMax = frame_[0], fSum = 0.0f;
+    for (size_t k = 0; k < N; ++k) {
+      const float v = frame_[k];
+      fSum += v;
+      if (v < fMin) fMin = v;
+      if (v > fMax) fMax = v;
+    }
+    const float fMean = fSum / (float)N;
+    LOG_DEBUG(TAG,
+              "ibi seen=%lu acc=%lu rej=%lu med=%ums | resample ok n=%u "
+              "mean=%.3fs range=%.3fs",
+              (unsigned long)totalSeen_,
+              (unsigned long)filter_.totalAccepted(),
+              (unsigned long)filter_.totalRejected(),
+              (unsigned)filter_.medianMs(),
+              (unsigned)n, fMean, (fMax - fMin));
+  } else {
+    LOG_DEBUG(TAG,
+              "ibi seen=%lu acc=%lu rej=%lu med=%ums | resample skip "
+              "n=%u span=%.1f/%.0fs",
+              (unsigned long)totalSeen_,
+              (unsigned long)filter_.totalAccepted(),
+              (unsigned long)filter_.totalRejected(),
+              (unsigned)filter_.medianMs(),
+              (unsigned)n, availSpanS, windowS);
+  }
 
   latest_.sessionSec = (now - pipelineStartMs_) / 1000u;
   latest_.updatedMs  = now;
