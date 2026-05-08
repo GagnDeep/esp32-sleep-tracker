@@ -5,13 +5,17 @@
 #include "../app/SessionManager.h"
 #include "../app/Settings.h"
 #include "../app/AlarmController.h"
+#include "../sensors/SensorRegistry.h"
 #include "../storage/SessionStore.h"
 #include "../storage/Sample.h"
 #include "../util/Log.h"
 #include "../util/TimeService.h"
+#include "../util/I2cBus.h"
+#include "pins.h"
 #include "version.h"
 #include <ArduinoJson.h>
 #include <AsyncJson.h>
+#include <Wire.h>
 #include <math.h>
 #include <memory>
 #include <time.h>
@@ -19,6 +23,7 @@
 
 extern SessionStore sessionStore;
 extern AlarmController alarmController;
+extern SensorRegistry sensors;
 
 namespace {
 constexpr const char* TAG = "api";
@@ -256,6 +261,8 @@ void registerRoutes(AsyncWebServer& s) {
     d["live"]["activity"] = sessionManager.activity();
     d["live"]["stage"]    = sessionManager.stage();
     d["live"]["flags"]    = sessionManager.flags();
+    d["sensors"]["max30102"] = sensors.maxOk();
+    d["sensors"]["mpu6050"]  = sensors.mpuOk();
     d["calibration_nights_done"] = settings.baselineNights;
     d["ws_drops"]         = ws_broadcaster::dropCount();
     d["pin_required"]     = settings.pin.length() > 0;
@@ -609,6 +616,59 @@ void registerRoutes(AsyncWebServer& s) {
     sendJson(req, 200, "{\"ok\":true,\"rebooting\":true}");
     delay(200);
     wifi::resetAndReboot();
+  });
+
+  // ---- /api/debug/i2c-scan --------------------------------------------
+  // Diagnostic: probe every 7-bit I2C address and report which devices
+  // ACK'd, plus identifying registers for known sensors. Useful when
+  // /api/status reports max30102=false to distinguish wiring/power from
+  // wrong-address from chip-locked-up. Open endpoint (read-only).
+  s.on("/api/debug/i2c-scan", HTTP_GET, [](AsyncWebServerRequest* req) {
+    JsonDocument d;
+    d["sda_pin"] = pins::I2C_SDA;
+    d["scl_pin"] = pins::I2C_SCL;
+    JsonArray devs = d["devices"].to<JsonArray>();
+    bool max_found = false, mpu_found = false;
+    {
+      I2cGuard g;
+      for (uint8_t addr = 0x08; addr <= 0x77; ++addr) {
+        Wire.beginTransmission(addr);
+        const uint8_t err = Wire.endTransmission();
+        if (err == 0) {
+          JsonObject o = devs.add<JsonObject>();
+          char hx[5]; snprintf(hx, sizeof(hx), "0x%02X", addr);
+          o["addr"] = hx;
+          if (addr == 0x57) max_found = true;
+          if (addr == 0x68 || addr == 0x69) mpu_found = true;
+        }
+      }
+      // MAX30102 fingerprint: PART_ID @ 0xFF should read 0x15, REV_ID @ 0xFE.
+      if (max_found) {
+        Wire.beginTransmission(0x57);
+        Wire.write(0xFF);
+        if (Wire.endTransmission(false) == 0 && Wire.requestFrom((uint8_t)0x57, (uint8_t)1) == 1) {
+          d["max30102"]["part_id"] = (int)Wire.read();
+        }
+        Wire.beginTransmission(0x57);
+        Wire.write(0xFE);
+        if (Wire.endTransmission(false) == 0 && Wire.requestFrom((uint8_t)0x57, (uint8_t)1) == 1) {
+          d["max30102"]["rev_id"] = (int)Wire.read();
+        }
+      }
+      // MPU6050 fingerprint: WHO_AM_I @ 0x75 should read 0x68.
+      if (mpu_found) {
+        const uint8_t mpuAddr = devs.size() > 0 ? 0x68 : 0x69;
+        Wire.beginTransmission(mpuAddr);
+        Wire.write(0x75);
+        if (Wire.endTransmission(false) == 0 && Wire.requestFrom(mpuAddr, (uint8_t)1) == 1) {
+          d["mpu6050"]["who_am_i"] = (int)Wire.read();
+        }
+      }
+    }
+    d["max30102_online"] = sensors.maxOk();
+    d["mpu6050_online"]  = sensors.mpuOk();
+    String out; serializeJson(d, out);
+    sendJson(req, 200, out);
   });
 
   // GET /api/wifi/scan — cached scan list.
