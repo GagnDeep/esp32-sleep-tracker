@@ -1,6 +1,7 @@
 #include "SessionManager.h"
 #include "Settings.h"
 #include "SleepStager.h"
+#include "../dsp/Coherence.h"
 #include "../net/WsBroadcaster.h"
 #include "../util/Log.h"
 #include "../util/TimeService.h"
@@ -44,6 +45,7 @@ void SessionManager::sensorTick() {
       if (hr_.popBeatIntervalMs(rr)) {
         hrv_.pushBeat(r.t_ms, rr);
         hrv_.prune(r.t_ms);
+        coherence::pushIbi(r.t_ms, rr);
       }
       const uint16_t s = spo2_.push(r.ir, r.red);
       liveSpo2_ = s;
