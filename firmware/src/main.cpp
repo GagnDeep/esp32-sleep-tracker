@@ -17,6 +17,7 @@
 #include "app/SessionManager.h"
 #include "app/SleepStager.h"
 #include "app/AlarmController.h"
+#include "dsp/Coherence.h"
 
 #include "net/WifiProvisioner.h"
 #include "net/WebServer.h"
@@ -70,6 +71,18 @@ static void alarmTask(void* /*arg*/) {
   }
 }
 
+static void coherenceTask(void* /*arg*/) {
+  esp_task_wdt_add(nullptr);
+  // The expensive 256-pt FFT only runs once every cfg::COHERENCE_UPDATE_S
+  // seconds; this loop just wakes often enough to keep the gate
+  // responsive and to feed the WDT. 500 ms is well under the 10 s WDT.
+  for (;;) {
+    coherence::tickIfDue();
+    esp_task_wdt_reset();
+    vTaskDelay(pdMS_TO_TICKS(500));
+  }
+}
+
 void setup() {
   logging::begin(115200);
   // Silence all Serial output until WiFi is up. Improv-Serial uses
@@ -117,6 +130,7 @@ void setup() {
   sleepStager.begin(&sessionManager);
   alarmController.begin(&sessionManager);
   sessionManager.setStager(&sleepStager);
+  coherence::begin();
 
   if (!wifi::begin(settings.deviceName)) {
     // begin() reboots on failure; we won't get here.
@@ -156,6 +170,9 @@ void setup() {
   xTaskCreatePinnedToCore(pipelineTask, "pipeline", 8192, nullptr, 2, nullptr, 0);
   xTaskCreatePinnedToCore(stagerTask,   "stager",   4096, nullptr, 1, nullptr, 0);
   xTaskCreatePinnedToCore(alarmTask,    "alarm",    4096, nullptr, 1, nullptr, 0);
+  if (cfg::COHERENCE_ENABLED) {
+    xTaskCreatePinnedToCore(coherenceTask, "coherence", 4096, nullptr, 2, nullptr, 0);
+  }
 
   digitalWrite(pins::STATUS_LED, LOW);
   LOG_INFO(TAG, "ready");
