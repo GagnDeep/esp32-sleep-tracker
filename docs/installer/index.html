@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Sleep Tracker · One-click installer</title>
-  <meta name="description" content="Flash and provision your ESP32-C3 sleep tracker from the browser — no terminal, no IDE." />
+  <meta name="description" content="Flash and provision your ESP32 or ESP32-C3 sleep tracker from the browser — no terminal, no IDE." />
   <meta name="theme-color" content="#0b0d10" />
   <style>
     :root {
@@ -215,12 +215,13 @@
 </head>
 <body>
   <main>
-    <span class="tag">v0.2.0-dev · ESP32-C3</span>
+    <span class="tag">v0.2.0-dev · ESP32 + ESP32-C3</span>
     <h1>Sleep Tracker installer</h1>
     <p class="lede">
       Flash the firmware, hand over your WiFi, and land on the device's
-      web app — without touching a terminal. Plug in your ESP32-C3 board
-      over USB and click below.
+      web app — without touching a terminal. Plug in your ESP32 (classic
+      dev kit) or ESP32-C3 board over USB and click below — the
+      installer auto-detects the chip and picks the right build.
     </p>
 
     <div class="browser-warn">
@@ -234,9 +235,11 @@
     <!-- Primary CTA: full install + WiFi setup -->
     <div class="card">
       <h3>New device — install firmware and configure WiFi</h3>
-      <p>Pick this if you just got a blank ESP32-C3 board. The page
-        flashes ~1.4 MB of firmware (about 8 seconds) and immediately
-        opens the WiFi setup dialog.</p>
+      <p>Pick this if you just got a blank ESP32 or ESP32-C3 board. The
+        page detects the chip family, flashes ~1.4 MB of firmware
+        (about 8 seconds on a C3, ~30 seconds on a classic ESP32 over
+        a CP2102 UART bridge), and immediately opens the WiFi setup
+        dialog.</p>
       <div class="row" style="margin-top: 16px;">
         <esp-web-install-button manifest="./manifest.json">
           <button slot="activate">⚡  Connect &amp; install</button>
@@ -276,15 +279,15 @@
     <ol class="steps">
       <li>
         <strong>Pick the serial port.</strong>
-        <small>A small browser dialog asks you to pick a port. Choose <code>USB JTAG/serial debug unit</code> or the <code>cu.usbmodem*</code> entry. Click <strong>Connect</strong>.</small>
+        <small>A small browser dialog asks you to pick a port. On a C3 choose <code>USB JTAG/serial debug unit</code> or the <code>cu.usbmodem*</code> entry; on a classic ESP32 with a CP2102/CH340 bridge choose <code>cu.usbserial-*</code> or <code>cu.SLAB_USBtoUART</code>. Click <strong>Connect</strong>.</small>
       </li>
       <li>
         <strong>Firmware flashes.</strong>
-        <small>You'll see a progress bar going from 0 to 100%. About 8 seconds on a USB 2.0 port. <em>Skipped if you used "Configure WiFi only".</em></small>
+        <small>You'll see a progress bar going from 0 to 100%. About 8 seconds on a C3 over USB 2.0; ~30 seconds on a classic ESP32 over a UART bridge. <em>Skipped if you used "Configure WiFi only".</em></small>
       </li>
       <li>
         <strong>WiFi network picker appears.</strong>
-        <small>The page asks the firmware to scan and shows the result as a list with signal bars and lock icons. Pick your network. <strong>2.4 GHz only</strong> — the C3 can't see 5 GHz.</small>
+        <small>The page asks the firmware to scan and shows the result as a list with signal bars and lock icons. Pick your network. <strong>2.4 GHz only</strong> — neither chip's radio can see 5 GHz.</small>
       </li>
       <li>
         <strong>Enter your WiFi password.</strong>
@@ -297,15 +300,27 @@
     </ol>
 
     <h2>Wiring (one sensor, four wires)</h2>
+    <p style="font-size: 0.9rem;">
+      Pin numbers depend on which chip you flashed. Both share the same
+      MAX30102 + (optional) MPU6050 on a single I2C bus.
+    </p>
+    <h3 style="font-size:0.95rem;margin:18px 0 6px;color:var(--ink);">ESP32-C3 DevKitM-1</h3>
     <div class="grid">
       <div class="feat"><strong>MAX30102 VIN</strong><span>3V3 pin</span></div>
       <div class="feat"><strong>MAX30102 GND</strong><span>GND</span></div>
       <div class="feat"><strong>MAX30102 SDA</strong><span>GPIO 4</span></div>
       <div class="feat"><strong>MAX30102 SCL</strong><span>GPIO 5</span></div>
     </div>
+    <h3 style="font-size:0.95rem;margin:18px 0 6px;color:var(--ink);">Classic ESP32 (DevKit-V1, NodeMCU-32S, etc.)</h3>
+    <div class="grid">
+      <div class="feat"><strong>MAX30102 VIN</strong><span>3V3 pin</span></div>
+      <div class="feat"><strong>MAX30102 GND</strong><span>GND</span></div>
+      <div class="feat"><strong>MAX30102 SDA</strong><span>GPIO 21</span></div>
+      <div class="feat"><strong>MAX30102 SCL</strong><span>GPIO 22</span></div>
+    </div>
     <p style="font-size: 0.85rem; margin-top: 8px;">
-      Optional: an MPU6050 IMU on the same I2C bus (SDA=GPIO4, SCL=GPIO5).
-      No SD card required — sessions are stored in LittleFS.
+      Optional: an MPU6050 IMU on the same I2C bus. No SD card required —
+      sessions are stored in LittleFS.
     </p>
 
     <h2>What's in the firmware</h2>
@@ -323,6 +338,7 @@
       Built with <a href="https://esphome.github.io/esp-web-tools/">ESP Web Tools</a> ·
       Provisioning over <a href="https://www.improv-wifi.com/serial/">Improv-Serial</a>.
       <div class="badges">
+        <span class="badge">ESP32</span>
         <span class="badge">ESP32-C3</span>
         <span class="badge">Web Serial</span>
         <span class="badge">PWA</span>
