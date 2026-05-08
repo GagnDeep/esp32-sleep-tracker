@@ -10,7 +10,7 @@ export {};
 // trust the runtime here.
 const sw = self as unknown as ServiceWorkerGlobalScope;
 
-const VERSION = 'v2';
+const VERSION = 'v3';
 const SHELL = `shell-${VERSION}`;
 const SESSIONS = `sessions-${VERSION}`;
 
