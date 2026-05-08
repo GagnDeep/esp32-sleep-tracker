@@ -125,29 +125,80 @@ void tickIfDue() {
   }
 
   if (resampleOk) {
-    // Spectral path: window + FFT, then locate the dominant in-band
-    // peak. Stage 5 will turn this into a coherence ratio + score; for
-    // now we just log it as a sanity check.
     coherence_fft::compute(frame_, power_);
 
-    const float binHz   = coherence_fft::binWidthHz(fs);
-    const size_t binLo  = (size_t)((float)cfg::COHERENCE_BAND_LO_HZ / binHz);
-    const size_t binHiC = (size_t)((float)cfg::COHERENCE_BAND_HI_HZ / binHz);
-    const size_t binHi  = binHiC < (N / 2) ? binHiC : (N / 2);
+    // ---- Peak / broadband bin layout ---------------------------------
+    // binWidth = fs / N = 0.015625 Hz at 4 Hz / 256.
+    const float  binHz       = coherence_fft::binWidthHz(fs);
+    const size_t binLoBand   = (size_t)((float)cfg::COHERENCE_BAND_LO_HZ  / binHz);
+    const size_t binHiBand_  = (size_t)((float)cfg::COHERENCE_BAND_HI_HZ  / binHz);
+    const size_t binLoTotal  = (size_t)((float)cfg::COHERENCE_TOTAL_LO_HZ / binHz);
+    const size_t binHiTotal_ = (size_t)((float)cfg::COHERENCE_TOTAL_HI_HZ / binHz);
+    const size_t halfBins    = (size_t)((float)cfg::COHERENCE_PEAK_HALFWIDTH_HZ / binHz);
+    const size_t binHiBand   = binHiBand_  < (N / 2) ? binHiBand_  : (N / 2);
+    const size_t binHiTotal  = binHiTotal_ < (N / 2) ? binHiTotal_ : (N / 2);
 
-    size_t peakBin = binLo;
-    float  peakPow = power_[binLo];
-    for (size_t k = binLo + 1; k <= binHi; ++k) {
+    // ---- Find dominant peak in HRV band ------------------------------
+    size_t peakBin = binLoBand;
+    float  peakPow = power_[binLoBand];
+    for (size_t k = binLoBand + 1; k <= binHiBand; ++k) {
       if (power_[k] > peakPow) { peakPow = power_[k]; peakBin = k; }
     }
+
+    // ---- Peak vs broadband sums --------------------------------------
+    // peakSum: power in peakBin ± COHERENCE_PEAK_HALFWIDTH_HZ — narrow
+    // window so a true sinusoidal modulation concentrates most of its
+    // energy here.
+    const size_t peakLo = peakBin > halfBins ? peakBin - halfBins : 0;
+    const size_t peakHi = (peakBin + halfBins) < (N / 2)
+                            ? (peakBin + halfBins) : (N / 2);
+    float peakSum = 0.0f;
+    for (size_t k = peakLo; k <= peakHi; ++k) peakSum += power_[k];
+
+    float totalSum = 0.0f;
+    for (size_t k = binLoTotal; k <= binHiTotal; ++k) totalSum += power_[k];
+
+    // ---- Coherence ratio = peak / (total - peak) ---------------------
+    // Guard the denominator: at startup (constant signal) total-peak is
+    // numerically zero. Treating it as ratio=0 (Low) is the right
+    // physical interpretation.
+    const float denom = totalSum - peakSum;
+    const float ratio = denom > 1e-12f ? peakSum / denom : 0.0f;
+
+    // ---- Score (0..16) ----------------------------------------------
+    // ratio * 4 saturates at score=16 for ratio >= 4. Captures the
+    // HeartMath bands: Low (<0.5) -> 0..2, Med (0.5..2.5) -> 2..10,
+    // High (>2.5) -> 10..16.
+    float scoreRaw = ratio * 4.0f;
+    if (scoreRaw < 0.0f)  scoreRaw = 0.0f;
+    if (scoreRaw > 16.0f) scoreRaw = 16.0f;
+    const uint8_t score = (uint8_t)(scoreRaw + 0.5f);
+
+    // ---- Level (0=Low,1=Med,2=High) ---------------------------------
+    uint8_t level = 0;
+    if (ratio >= (float)cfg::COHERENCE_HIGH_THRESH)      level = 2;
+    else if (ratio >= (float)cfg::COHERENCE_LOW_THRESH)  level = 1;
+
+    // ---- Achievement -------------------------------------------------
+    // Accumulate score-per-tick only while in Med or High coherence.
+    // Low ticks don't penalize; they just don't add — matches the way
+    // HeartMath apps treat noise/artifact periods.
+    uint32_t ach = (uint32_t)latest_.achievement;
+    if (level >= 1) ach += score;
+    if (ach > 0xFFFFu) ach = 0xFFFFu;
+
     const float peakHz = (float)peakBin * binHz;
     LOG_DEBUG(TAG,
-              "ibi acc=%lu rej=%lu | resample n=%u | peak f=%.3fHz "
-              "(bin %u) p=%.4g",
-              (unsigned long)filter_.totalAccepted(),
-              (unsigned long)filter_.totalRejected(),
-              (unsigned)n, peakHz, (unsigned)peakBin, peakPow);
-    latest_.dominantHz = peakHz;
+              "ratio=%.2f score=%u level=%u peakHz=%.3f peakP=%.4g "
+              "totP=%.4g ach=%u",
+              ratio, (unsigned)score, (unsigned)level, peakHz,
+              peakSum, totalSum, (unsigned)ach);
+
+    latest_.ratio       = ratio;
+    latest_.score       = score;
+    latest_.level       = level;
+    latest_.dominantHz  = peakHz;
+    latest_.achievement = (uint16_t)ach;
   } else {
     LOG_DEBUG(TAG,
               "ibi acc=%lu rej=%lu | resample skip n=%u span=%.1f/%.0fs",
