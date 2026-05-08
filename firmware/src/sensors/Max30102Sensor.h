@@ -24,6 +24,12 @@ class Max30102Sensor : public ISensor {
   // Latest reading; returns false if no new sample since last get().
   bool get(Reading& out);
 
+  // Peek at the most recent reading without consuming hasFresh_. Returns
+  // zero-initialised values until the first poll() success. Used by
+  // diagnostic API endpoints.
+  Reading peek() const { return last_; }
+  uint16_t fingerThreshold() const { return fingerThresh_; }
+
   void setLedBrightness(uint8_t b);
   void setFingerThreshold(uint16_t t) { fingerThresh_ = t; }
 

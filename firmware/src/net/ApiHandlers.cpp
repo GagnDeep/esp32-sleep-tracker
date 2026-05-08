@@ -618,6 +618,39 @@ void registerRoutes(AsyncWebServer& s) {
     wifi::resetAndReboot();
   });
 
+  // ---- /api/debug/sensor-raw ------------------------------------------
+  // Latest raw IR / Red counts from the MAX30102 plus the finger-detect
+  // threshold. Lets a user verify the LEDs are firing and reflecting off
+  // their finger before trusting the HR/SpO2 derived numbers.
+  s.on("/api/debug/sensor-raw", HTTP_GET, [](AsyncWebServerRequest* req) {
+    JsonDocument d;
+    d["max30102_online"] = sensors.maxOk();
+    if (sensors.maxOk()) {
+      auto r = sensors.max().peek();
+      d["ir"]              = r.ir;
+      d["red"]             = r.red;
+      d["finger"]          = r.finger;
+      d["finger_threshold"] = sensors.max().fingerThreshold();
+      d["sample_age_ms"]   = (uint32_t)(millis() - r.t_ms);
+    }
+    String out; serializeJson(d, out);
+    sendJson(req, 200, out);
+  });
+
+  // ---- /api/debug/rescan -----------------------------------------------
+  // Force a sensor re-init now without waiting for the periodic 5s retry.
+  // Useful right after wiring up a sensor on a running device.
+  s.on("/api/debug/rescan", HTTP_POST, [](AsyncWebServerRequest* req) {
+    if (!authOk(req)) return;
+    const bool recovered = sensors.rescan();
+    JsonDocument d;
+    d["recovered"] = recovered;
+    d["max30102"]  = sensors.maxOk();
+    d["mpu6050"]   = sensors.mpuOk();
+    String out; serializeJson(d, out);
+    sendJson(req, 200, out);
+  });
+
   // ---- /api/debug/i2c-scan --------------------------------------------
   // Diagnostic: probe every 7-bit I2C address and report which devices
   // ACK'd, plus identifying registers for known sensors. Useful when

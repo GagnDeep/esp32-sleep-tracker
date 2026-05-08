@@ -14,19 +14,28 @@ constexpr float SCALE = 0.0035f;
 }  // namespace
 
 bool Mpu6050Sensor::begin() {
-  {
-    I2cGuard g;
-    dev_.initialize();
-    ok_ = dev_.testConnection();
-    if (!ok_) {
-      LOG_ERROR(TAG, "testConnection failed");
-      return false;
+  // Same power-up race as Max30102: retry a few times before declaring
+  // the chip absent so a slightly-slow sensor isn't permanently disabled.
+  for (int attempt = 0; attempt < 4; ++attempt) {
+    if (attempt > 0) delay(80);
+    bool connected;
+    {
+      I2cGuard g;
+      dev_.initialize();
+      connected = dev_.testConnection();
     }
-    // ±2g full-scale gives the best resolution for sleep-scale movement.
-    dev_.setFullScaleAccelRange(MPU6050_ACCEL_FS_2);
+    if (connected) {
+      I2cGuard g;
+      // ±2g full-scale gives the best resolution for sleep-scale movement.
+      dev_.setFullScaleAccelRange(MPU6050_ACCEL_FS_2);
+      ok_ = true;
+      LOG_INFO(TAG, "online");
+      return true;
+    }
   }
-  LOG_INFO(TAG, "online");
-  return true;
+  LOG_ERROR(TAG, "testConnection failed after 4 attempts");
+  ok_ = false;
+  return false;
 }
 
 void Mpu6050Sensor::poll() {

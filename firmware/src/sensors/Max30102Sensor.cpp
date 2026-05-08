@@ -9,14 +9,28 @@ constexpr const char* TAG = "max30102";
 }
 
 bool Max30102Sensor::begin() {
-  {
-    I2cGuard g;
-    if (!dev_.begin(Wire, I2C_SPEED_FAST)) {
-      LOG_ERROR(TAG, "begin failed");
+  // The MAX30102 sometimes isn't ready to ACK on I2C until ~50-100 ms after
+  // power-up. If the ESP32 boots faster than the sensor (common after EN
+  // reset while the sensor stays powered), the SparkFun lib's first
+  // readPartID() can return -1 and begin() returns false. Retry a few times
+  // with small delays before giving up.
+  for (int attempt = 0; attempt < 4; ++attempt) {
+    if (attempt > 0) delay(80);
+    bool started;
+    {
+      I2cGuard g;
+      started = dev_.begin(Wire, I2C_SPEED_FAST);
+    }
+    if (started) break;
+    if (attempt == 3) {
+      LOG_ERROR(TAG, "begin failed after %d attempts", attempt + 1);
       ok_ = false;
       return false;
     }
+  }
 
+  {
+    I2cGuard g;
     // Recommended config for HR + SpO2: 100 Hz, 411 us pulse width,
     // sample averaging x4, FIFO rollover on so we never block the bus.
     dev_.setup(/*ledBrightness=*/cfg::MAX30102_LED_BRIGHTNESS,
