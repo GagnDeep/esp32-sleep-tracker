@@ -18,6 +18,12 @@ namespace improv {
 // WiFi.begin() is attempted.
 void begin(const char* deviceName, const char* firmwareVersion);
 
+// Re-name the device after begin(). main.cpp calls begin() with a
+// hardcoded default before settings.load() resolves so the SDK can
+// detect us as fast as possible, then updates the name once settings
+// are loaded. Safe to call from any task.
+void setDeviceName(const char* deviceName);
+
 // Drive the protocol parser. Call frequently (every 1–10 ms) until
 // WiFi is provisioned. Idle when no bytes are pending.
 void tick();

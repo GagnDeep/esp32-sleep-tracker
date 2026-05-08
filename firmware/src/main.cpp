@@ -87,25 +87,28 @@ void setup() {
   // half-alive system.
   esp_task_wdt_init(cfg::WDT_TIMEOUT_S, true);
 
-  if (!LittleFS.begin(true)) {
-    LOG_ERROR(TAG, "LittleFS mount failed — halting");
-    while (true) delay(1000);
-  }
-
-  settings.load();
-  timeservice::setTimezone(settings.timezone.c_str());
-
-  // Improv-Serial: listen on USB-CDC for browser-installer provisioning.
-  // Started early (before sensor / SD / web init) so the SDK probe
-  // wins the race against any boot work that could otherwise delay
-  // our first response past its ~1 s timeout.
-  improv::begin(settings.deviceName.c_str(), FIRMWARE_VERSION);
+  // Improv-Serial: listen on UART/USB-CDC for browser-installer
+  // provisioning. Started BEFORE LittleFS / settings / sensors so the
+  // SDK probe (which can arrive within ~200 ms of the post-flash reset)
+  // wins the race. We pass a placeholder device name and update it via
+  // setDeviceName() once settings.load() resolves below; until then the
+  // SDK reports the device as "Sleep Tracker" in GET_DEVICE_INFO.
+  improv::begin("Sleep Tracker", FIRMWARE_VERSION);
   xTaskCreate([](void*) {
     while (true) {
       improv::tick();
       vTaskDelay(pdMS_TO_TICKS(5));
     }
   }, "improv", 4096, nullptr, 2, nullptr);
+
+  if (!LittleFS.begin(true)) {
+    LOG_ERROR(TAG, "LittleFS mount failed — halting");
+    while (true) delay(1000);
+  }
+
+  settings.load();
+  improv::setDeviceName(settings.deviceName.c_str());
+  timeservice::setTimezone(settings.timezone.c_str());
 
   i2cbus::init();
   sensors.begin();

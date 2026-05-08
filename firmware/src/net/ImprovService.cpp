@@ -362,8 +362,19 @@ void begin(const char* deviceName, const char* firmwareVersion) {
   s_deviceName = deviceName;
   s_fwVersion  = firmwareVersion;
   // Announce initial state so a connected installer page can render.
-  sendCurrentState(STATE_READY);
+  // Send several back-to-back so an SDK that opens the port a few
+  // hundred ms after our reset (the typical hand-off from esp-web-tools
+  // to the Improv-Serial SDK) catches at least one within its detect
+  // window without waiting for the 1500 ms periodic.
+  for (int i = 0; i < 4; ++i) {
+    sendCurrentState(STATE_READY);
+    delay(50);
+  }
   LOG_INFO(TAG, "ready");
+}
+
+void setDeviceName(const char* deviceName) {
+  if (deviceName) s_deviceName = deviceName;
 }
 
 void tick() {
@@ -408,9 +419,13 @@ void tick() {
 
   // Periodic READY announcement so passive-listening hosts (some
   // versions of improv-wifi-serial-sdk only listen, never probe) can
-  // detect the device after they open the port.
+  // detect the device after they open the port. We ramp the cadence:
+  // for the first 10 s of uptime we shout every 250 ms so the SDK
+  // catches one within its short detect window, then we throttle to
+  // 1500 ms to keep the channel quiet for normal operation.
   const uint32_t now = millis();
-  if (now - s_lastAnnounceMs > 1500) {
+  const uint32_t period = (now < 10'000UL) ? 250UL : 1500UL;
+  if (now - s_lastAnnounceMs > period) {
     s_lastAnnounceMs = now;
     sendCurrentState(STATE_READY);
   }
