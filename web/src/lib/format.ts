@@ -179,6 +179,22 @@ export function scoreBandTone(band: ScoreBand): 'good' | 'accent' | 'warn' | 'ba
   return tones[band];
 }
 
+// ---------- HRV coherence ----------
+
+/** Map firmware level (0=Low, 1=Med, 2=High) to a display label. */
+export function formatCoherenceLevel(level: 0 | 1 | 2 | number): 'Low' | 'Med' | 'High' {
+  if (level >= 2) return 'High';
+  if (level >= 1) return 'Med';
+  return 'Low';
+}
+
+/** Tone for a coherence level — slots into Pill / NumberTile. */
+export function coherenceLevelTone(level: 0 | 1 | 2 | number): 'bad' | 'warn' | 'good' {
+  if (level >= 2) return 'good';
+  if (level >= 1) return 'warn';
+  return 'bad';
+}
+
 // "Hour:minute" string from minutes-of-day, used for alarm rendering.
 // Doesn't take displayTimezone — minutes-of-day are already local to
 // the device's wall clock.

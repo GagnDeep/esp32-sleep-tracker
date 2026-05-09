@@ -77,3 +77,21 @@ effect(() => {
 
 /** Last night's session summary (or null if none recorded). Used by Today screen. */
 export const lastNightSummary = signal<SessionSummary | null>(null);
+
+/**
+ * Live HRV-coherence snapshot. Mirrors the firmware Snapshot shape from
+ * dsp/Coherence.h. Updated every ~5 s by the WS dispatcher; null until
+ * the first frame arrives.
+ */
+export interface LiveCoherence {
+  ratio: number;
+  score: number;       // 0..16
+  level: 0 | 1 | 2;    // 0=Low, 1=Med, 2=High
+  achievement: number; // cumulative
+  dominantHz: number;
+  sessionSec: number;
+  /** Wall-clock ms when this update arrived from the device. */
+  receivedAt: number;
+}
+
+export const liveCoherence = signal<LiveCoherence | null>(null);

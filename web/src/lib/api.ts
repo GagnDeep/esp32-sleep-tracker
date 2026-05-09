@@ -20,6 +20,18 @@ export interface DeviceStatus {
   session_id: string;
   live: { hr: number; spo2_x10: number; activity: number; stage: number; flags: number };
   calibration_nights_done: number;
+  // Optional — present when the firmware was built with coherence enabled.
+  // Older firmwares omit the block; the dashboard treats absence as
+  // "feature unavailable" and hides the coherence UI.
+  coherence?: {
+    enabled: boolean;
+    ratio: number;
+    score: number;       // 0..16
+    level: 0 | 1 | 2;    // 0=Low, 1=Med, 2=High
+    ach: number;         // cumulative achievement
+    f0: number;          // dominant frequency (Hz)
+    sec: number;         // pipeline-elapsed seconds
+  };
 }
 
 export interface SessionSummary {

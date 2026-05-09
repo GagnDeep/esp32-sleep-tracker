@@ -4,6 +4,7 @@
 
 import {
   connectionStatus,
+  liveCoherence,
   liveStats,
   otaProgress,
   type OtaProgress,
@@ -30,9 +31,19 @@ export interface OtaProgressEvent {
   bytes_total?: number;
   error_message?: string;
 }
+export interface CoherenceEvent {
+  type: 'coherence';
+  ratio: number;
+  score: number;
+  level: 0 | 1 | 2;
+  ach: number;
+  f0: number;
+  sec: number;
+}
 export type WsEvent =
   | SampleEvent | StageEvent | AlarmEvent
-  | StatusEvent | DropsEvent | OtaProgressEvent;
+  | StatusEvent | DropsEvent | OtaProgressEvent
+  | CoherenceEvent;
 
 const listeners = new Map<WsEvent['type'], Set<Listener<WsEvent>>>();
 
@@ -96,6 +107,17 @@ export function handleWsMessage(e: WsEvent): void {
       break;
     case 'status':
       connectionStatus.value = e.value;
+      break;
+    case 'coherence':
+      liveCoherence.value = {
+        ratio:       e.ratio,
+        score:       e.score,
+        level:       e.level,
+        achievement: e.ach,
+        dominantHz:  e.f0,
+        sessionSec:  e.sec,
+        receivedAt:  Date.now(),
+      };
       break;
     case 'drops':
       wsDrops.value = e.count;

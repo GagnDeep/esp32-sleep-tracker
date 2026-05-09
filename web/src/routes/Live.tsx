@@ -7,6 +7,7 @@ import { NumberTile } from '../components/ui/NumberTile';
 import { Pill } from '../components/ui/Pill';
 import { EmptyState } from '../components/ui/EmptyState';
 import { HrSpo2Chart } from '../components/charts/HrSpo2Chart';
+import { CoherenceCard } from '../components/CoherenceCard';
 import { formatBpm, formatPct, stageLabels } from '../lib/format';
 
 const ROLLING_S = 60;
@@ -180,6 +181,14 @@ export function Live() {
           hint={stageLabels[stats.stage]}
         />
       </div>
+
+      {/* Coherence is only published by firmwares built with it enabled.
+          The status block reports `enabled`; absence (older firmware)
+          hides the card entirely so the page doesn't show a perpetual
+          "warming up" placeholder. */}
+      {status?.coherence?.enabled && (
+        <CoherenceCard windowS={ROLLING_S} />
+      )}
 
       <Card title="Live waveform" hint={`last ${ROLLING_S}s`}>
         {noLiveData ? (
