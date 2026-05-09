@@ -39,4 +39,7 @@ class Max30102Sensor : public ISensor {
   bool     hasFresh_ = false;
   bool     ok_ = false;
   uint16_t fingerThresh_ = 50'000;
+  // Decimation counter for the cfg::MAX30102_SAMPLE_HZ -> 100 Hz path.
+  // Counts raw FIFO samples; emits a Reading on every Nth one.
+  uint8_t  decimCount_ = 0;
 };

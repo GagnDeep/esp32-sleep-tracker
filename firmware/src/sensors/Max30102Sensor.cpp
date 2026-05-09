@@ -31,13 +31,17 @@ bool Max30102Sensor::begin() {
 
   {
     I2cGuard g;
-    // Recommended config for HR + SpO2: 100 Hz, 411 us pulse width,
-    // sample averaging x4, FIFO rollover on so we never block the bus.
+    // 400 Hz raw rate (SparkFun driver supports 50/100/200/400/800/1000
+    // /1600/3200), 411 us pulse width = 18-bit ADC depth, no chip-side
+    // averaging — we decimate in software so the coherence pipeline
+    // gets the full 400 Hz timing precision while HR/SpO2 still see an
+    // effective 100 Hz stream. FIFO rollover on so a stalled drain
+    // doesn't block the I2C bus.
     dev_.setup(/*ledBrightness=*/cfg::MAX30102_LED_BRIGHTNESS,
-               /*sampleAverage=*/4,
+               /*sampleAverage=*/cfg::MAX30102_SAMPLE_AVG,
                /*ledMode=*/2,        // Red + IR
-               /*sampleRate=*/100,
-               /*pulseWidth=*/411,
+               /*sampleRate=*/cfg::MAX30102_SAMPLE_HZ,
+               /*pulseWidth=*/cfg::MAX30102_PULSE_WIDTH_US,
                /*adcRange=*/4096);
   }
 
@@ -50,16 +54,29 @@ bool Max30102Sensor::begin() {
 void Max30102Sensor::poll() {
   if (!ok_) return;
   I2cGuard g;
-  while (dev_.available() == 0) {
-    dev_.check();
-    if (dev_.available() == 0) return;  // nothing this cycle
+  // Drain everything the chip has buffered. At MAX30102_SAMPLE_HZ=400
+  // and SENSOR_HZ=400, we typically pull 0–1 sample per call; under
+  // scheduler jitter we can pull a few. dev_.check() pulls the FIFO
+  // contents into the driver's internal ring; dev_.available() then
+  // reports how many entries we can consume.
+  dev_.check();
+  while (dev_.available() > 0) {
+    const uint32_t red = dev_.getFIFORed();
+    const uint32_t ir  = dev_.getFIFOIR();
+    dev_.nextSample();
+
+    // Software decimation: only every Nth raw sample becomes a Reading
+    // for HR/SpO2 consumers. Without this they'd see the full 400 Hz
+    // stream and the HeartRateEstimator's fixed-tap state would be
+    // wrong by a 4× factor.
+    if (++decimCount_ < cfg::SENSOR_DECIMATION) continue;
+    decimCount_ = 0;
+    last_.t_ms   = timeservice::monotonicMs();
+    last_.red    = red;
+    last_.ir     = ir;
+    last_.finger = ir > fingerThresh_;
+    hasFresh_    = true;
   }
-  last_.t_ms   = timeservice::monotonicMs();
-  last_.red    = dev_.getFIFORed();
-  last_.ir     = dev_.getFIFOIR();
-  last_.finger = last_.ir > fingerThresh_;
-  hasFresh_    = true;
-  dev_.nextSample();
 }
 
 bool Max30102Sensor::get(Reading& out) {

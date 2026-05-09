@@ -7,9 +7,17 @@
 namespace cfg {
 
 // ---- Sampling ----------------------------------------------------------
-constexpr uint16_t SENSOR_HZ          = 100;   // raw sensor task rate
+// Sensor task wake rate. The MAX30102 ADC runs at MAX30102_SAMPLE_HZ;
+// the task wakes faster than the FIFO produces (integer truncation
+// gives ~500 Hz at SENSOR_HZ=400) and the FIFO drain loop in
+// Max30102Sensor::poll() absorbs whatever's available.
+constexpr uint16_t SENSOR_HZ          = 400;   // raw sensor task rate
 constexpr uint16_t SAMPLE_HZ          = 1;     // 1Hz aggregated sample rate
 constexpr uint16_t SAMPLE_RING_SIZE   = 256;   // RAM ring before flush
+// Software decimation factor — every Nth raw sample is forwarded to the
+// HR/SpO2 ingestion path so legacy 100 Hz consumers see the same
+// effective rate as before the 400 Hz bump.
+constexpr uint8_t  SENSOR_DECIMATION  = 4;
 
 // ---- Storage -----------------------------------------------------------
 constexpr uint32_t FLUSH_INTERVAL_MS  = 60'000;
@@ -39,6 +47,15 @@ constexpr uint16_t SMART_ALARM_LOOKAHEAD_S = 1800;  // try wake in last 30 min
 #define MPU_USE_INT 0   // default to polled when SD shares pins
 constexpr uint8_t  MAX30102_LED_BRIGHTNESS = 0x1F;  // 0..0xFF
 constexpr uint16_t MAX30102_FINGER_THRESH  = 50'000;
+// MAX30102 ADC sample rate. The SparkFun driver supports
+// 50/100/200/400/800/1000/1600/3200 Hz; 400 Hz is spec-compliant for
+// HR + SpO2 with 411 us pulse width and gives the coherence pipeline
+// 2.5 ms timing precision on raw samples. The HR/SpO2 path sees an
+// effective cfg::MAX30102_SAMPLE_HZ / cfg::SENSOR_DECIMATION = 100 Hz
+// stream (decimated, not chip-averaged).
+constexpr uint16_t MAX30102_SAMPLE_HZ      = 400;
+constexpr uint8_t  MAX30102_SAMPLE_AVG     = 1;     // chip-side averaging
+constexpr uint16_t MAX30102_PULSE_WIDTH_US = 411;   // 18-bit ADC depth
 
 // ---- DSP numeric guards ------------------------------------------------
 constexpr uint16_t MIN_HR_DT_MS = 250;   // ignore beat intervals shorter than this
